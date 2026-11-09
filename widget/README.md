@@ -35,7 +35,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File widget\src\build.ps1 -Stop -
 
 - `widget-settings.json`(exe 옆): 창 자리 · 크기 · 항상 위 · 펼침 상태 · 본 세션 id(`knownIds`) · 접은 섹션
 - `~\.claude\session-board\meta.json`: 강조 · 읽음 · 미루기 · 확인 끝 · 리마인드 · 메모 · 위젯에 올림(`board`) — 플러그인과 같이 쓴다
-- `~\.claude\session-boardiew.json`: 앱 창에서 보고 있는 세션(플러그인 대표가 1.5초마다, 바뀔 때만 씀) — 읽기만
+- `~\.claude\session-board\view.json`: 앱 창에서 보고 있는 세션(플러그인 대표가 1.5초마다, 바뀔 때만 씀) — 읽기만
 
 ## 고치기
 
