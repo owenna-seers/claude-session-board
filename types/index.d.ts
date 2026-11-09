@@ -13,6 +13,8 @@ export type BoardSession = {
   needs?: boolean
   /** 무엇을 확인해야 하는지 한 줄 */
   ask?: string
+  /** 앱 사이드바에서 이 세션이 든 섹션 이름(위젯이 섹션별로 묶는다) */
+  group?: string
 }
 
 /** 로그인 계정 · 조직 (머리줄 오른쪽) */
@@ -31,6 +33,8 @@ export type BoardMeta = {
   memo?: string
   /** ✓ 확인 끝: 이 시각(그때의 마지막 활동) 뒤에 새 활동(새 대화 · 새 답)이 생기면 다시 올라온다 */
   hiddenAt?: string
+  /** 위젯에 올린 세션(위젯만 쓴다 · 플러그인 패널은 보지 않음) */
+  board?: boolean
   /** ⏸ 미루기(일단 보류): 사용자가 풀 때까지 접힌 칸에 둔다. 값은 미룰 때의 마지막 활동 시각 */
   heldAt?: string
   /** (옛 판이 남긴 값, 지금은 쓰지 않음) */

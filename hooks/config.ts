@@ -30,10 +30,13 @@ export const JUDGED_KEY = 'judged-4'
  * 플러그인 코드는 세션이 시작될 때 실리므로, 고치기 전에 열린 세션은 옛 코드로 돈다.
  * 판이 높은 세션이 옛 판 대표의 자리를 넘겨받아, 고친 판단이 바로 위젯에 나온다.
  */
-export const LEADER_V = 4
+export const LEADER_V = 6
 
 /** 대표 세션이 이 시간(ms) 넘게 소식이 없으면 다른 세션이 이어받는다 */
 export const LEADER_STALE_MS = 15_000
+
+/** 앱 창에서 지금 보고 있는 세션(view.json)을 살피는 주기(ms). 위젯이 그 카드에 테두리를 그린다 */
+export const VIEW_MS = 1_500
 
 /**
  * 시간 표기의 시간대(UTC 와의 차, 분). undefined 면 이 PC 의 시간대.

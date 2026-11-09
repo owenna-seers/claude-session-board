@@ -1,5 +1,5 @@
 // 이 PC 의 경로를 찾는다. 고정된 경로는 하나도 없다.
-//  - 공유 폴더(위젯과 나눠 쓰는 sessions.json · meta.json · leader.json)
+//  - 공유 폴더(위젯과 나눠 쓰는 sessions.json · meta.json · leader.json · view.json)
 //  - Claude 앱이 세션마다 두는 파일(cliSessionId · cwd) 의 폴더들
 //  - 세션 기록(jsonl) 폴더
 //  - 로그인 계정 정보(~/.claude.json)
@@ -13,6 +13,8 @@ export type Paths = {
   sessionsFile: string
   metaFile: string
   leaderFile: string
+  /** 앱 창에서 보고 있는 세션(대표가 씀, 위젯이 읽음) */
+  viewFile: string
   /** 세션 기록 jsonl: <projectsDir>/<cwd 를 비영숫자→- 로>/<cliSessionId>.jsonl */
   projectsDir: string
   /** 로그인 계정(oauthAccount) 이 든 파일 */
@@ -49,6 +51,7 @@ export async function getPaths($: EngineInterface): Promise<Paths> {
     sessionsFile: `${shareDir}/sessions.json`,
     metaFile: `${shareDir}/meta.json`,
     leaderFile: `${shareDir}/leader.json`,
+    viewFile: `${shareDir}/view.json`,
     projectsDir: `${configDir}/projects`,
     claudeJson: configDirEnv ? `${configDir}/.claude.json` : `${home}/.claude.json`,
     appSessionsRoots,

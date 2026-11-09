@@ -6,9 +6,9 @@
 import type { Register } from 'claude-code'
 
 import type { BoardJudgedMap, BoardMetaMap } from '../types'
-import { JUDGED_KEY, POLL_MS, STORE_KEY, TITLE } from './config'
+import { JUDGED_KEY, POLL_MS, STORE_KEY, TITLE, VIEW_MS } from './config'
 import { PANE, registerPane } from './pane'
-import { poll } from './poll'
+import { poll, pollView } from './poll'
 import { setJudged, setMeta } from './store'
 
 export const register: Register = on => {
@@ -25,6 +25,7 @@ export const register: Register = on => {
     // 모든 세션에 실리므로 패널은 /sessions 로 열 때만
     void poll($)
     $.clock.every(POLL_MS, () => void poll($))
+    $.clock.every(VIEW_MS, () => void pollView($))
     return next(e)
   })
 

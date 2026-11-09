@@ -53,7 +53,7 @@ C# 5 문법만 된다(윈도우 기본 csc). `$"..."` 보간 · `?.` · `nameof`
 
 1. `LEADER_V` · `JUDGED_KEY`: 판단 · 대표 방식을 고칠 때마다 올린다. 플러그인 코드는 세션이 시작될 때 실리므로, 고치기 전에 열린 세션이 대표면 옛 판단이 위젯에 남는다. 판이 높은 세션이 자리를 넘겨받는다.
 2. `sessions.json` 에 값을 더하면 `types/index.d.ts` 의 `BoardSession` · `BoardFile` 과 위젯 `Session` 클래스 · `Poll()` 에 같이 더한다.
-3. `meta.json` 의 키(`star` · `seenAt` · `heldAt` · `hiddenAt` · `remindAt` · `remindFired` · `memo`)는 플러그인과 위젯이 같이 쓴다. 바꾸면 둘 다.
+3. `meta.json` 의 키(`star` · `seenAt` · `heldAt` · `hiddenAt` · `remindAt` · `remindFired` · `memo` · `board`)는 플러그인과 위젯이 같이 쓴다. 바꾸면 둘 다. `view.json`({focused, visible}) 은 플러그인이 쓰고 위젯이 읽는다.
 4. 옛 `claude` 명령(2.1.2xx)은 hooks 모듈을 모른다. 앱에 든 것을 쓴다 — `CLAUDE.md` 1번.
 5. 검사기(`claude plugin validate`)가 거는 두 가지: ① atom 의 `read` · `update` 는 atom 을 선언한 파일(`store.ts`) 안에서만 — 다른 파일은 `store.ts` 의 `get*` · `set*` 함수로. ② `$` 를 다른 파일의 함수에 넘길 때 그 함수는 `function` 선언이어야 한다(`const f = async ($) => …` 는 거부).
 6. 줄 끝은 LF. `.ps1` 은 UTF-8 BOM(PowerShell 5.1 이 한글을 읽는 조건).

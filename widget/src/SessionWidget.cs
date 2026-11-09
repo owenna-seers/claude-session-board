@@ -29,8 +29,8 @@ using WinForms = System.Windows.Forms;
 [assembly: AssemblyProduct("세션 위젯")]
 [assembly: AssemblyDescription("Claude 세션 현황 위젯")]
 [assembly: AssemblyCompany("session-board")]
-[assembly: AssemblyVersion("1.1.0.0")]
-[assembly: AssemblyFileVersion("1.1.0.0")]
+[assembly: AssemblyVersion("1.2.0.0")]
+[assembly: AssemblyFileVersion("1.2.0.0")]
 
 namespace SessionWidget
 {
@@ -66,6 +66,8 @@ namespace SessionWidget
         public const string ColorRemoteOn = "#7EE2A8";
         public const string ColorWarn = "#FFB86B";
         public const string ColorError = "#FF7B7B";
+        /// 앱 창에서 지금 보고 있는 세션의 테두리 · 「보는 중」 글
+        public const string ColorViewing = "#7FE3FF";
 
         // 머리줄 문구
         public const string MsgWaiting = "현황 기다리는 중 — 플러그인을 설치한 뒤 Claude 앱에서 새 세션을 하나 열면 채워집니다";
@@ -82,6 +84,8 @@ namespace SessionWidget
         public bool IsRunning;
         public bool Remote;
         public bool Needs;
+        /// 앱 사이드바 섹션(그룹) 이름, 없으면 ""
+        public string Group = "";
     }
 
     static class Program
@@ -143,6 +147,21 @@ namespace SessionWidget
         long lastRender;
         bool showHeld;
         bool showDone;
+        // 위젯에 올린 세션만 본문에: meta board=true. 처음 보는 세션(knownIds 에 없음)은 저절로 올림
+        bool showOff;
+        bool boardInit;
+        HashSet<string> knownIds = new HashSet<string>();
+        HashSet<string> collapsedGroups = new HashSet<string>();
+        Button btnOff;
+        // 앱 창에서 지금 보고 있는 세션(플러그인 대표가 view.json 에 씀)
+        Button btnBoardView;
+        FrameworkElement foldRow;
+        string viewFile;
+        DateTime viewTime = DateTime.MinValue;
+        string viewFocused = "";
+        HashSet<string> viewVisible = new HashSet<string>();
+        Dictionary<string, Border> cardById = new Dictionary<string, Border>();
+        Dictionary<string, FrameworkElement> sectionById = new Dictionary<string, FrameworkElement>();
         Button btnHeld;
         Button btnDone;
         // 여러 개 고르기: Ctrl 클릭 · Shift 클릭 · 「☑ 여러 개 고르기」 켜고 클릭
@@ -198,15 +217,16 @@ namespace SessionWidget
           </DockPanel>
           <TextBlock x:Name='Summary' Foreground='White' FontWeight='Bold' FontSize='13' TextWrapping='Wrap'/>
           <TextBlock x:Name='SubLine' Foreground='#99FFFFFF' FontSize='11' TextWrapping='Wrap'/>
-          <StackPanel Orientation='Horizontal' Margin='-2,5,0,0'>
-            <Button x:Name='BtnSelect' ToolTip='켜면 카드를 누를 때마다 골라짐 · 꺼져 있어도 Ctrl 클릭 · Shift 클릭으로 고를 수 있음 · Esc 로 풀기'/>
-            <Button x:Name='BtnHeld' ToolTip='⏸ 미룬 것(일단 보류): 「미루기 풀기」 할 때까지 접혀 있음 · 펼치기 / 접기'/>
-            <Button x:Name='BtnDone' ToolTip='✓ 확인 끝: 새 대화가 시작되거나 새 답이 오면 다시 올라옴 · 펼치기 / 접기'/>
-          </StackPanel>
+          <Border Margin='-2,6,0,0' BorderBrush='#26FFFFFF' BorderThickness='0,1,0,0' Padding='0,5,0,0'>
+            <Button x:Name='BtnBoardView' HorizontalAlignment='Left'/>
+          </Border>
+          <Border Margin='-2,5,0,0' BorderBrush='#26FFFFFF' BorderThickness='0,1,0,0' Padding='0,5,0,0'>
+            <Button x:Name='BtnSelect' HorizontalAlignment='Left' ToolTip='켜면 카드를 누를 때마다 골라짐 · 꺼져 있어도 Ctrl 클릭 · Shift 클릭으로 고를 수 있음 · Esc 로 풀기'/>
+          </Border>
         </StackPanel>
       </Grid>
       <TextBlock DockPanel.Dock='Bottom' Margin='10,2,10,8' Foreground='#66FFFFFF' FontSize='10.5' TextWrapping='Wrap'
-                 Text='클릭: 앱에서 열기 + 읽음 · Ctrl / Shift 클릭: 여러 개 고르기 · 오른쪽 클릭: 강조 · 미루기 · 확인 끝 · 알람 · 메모'/>
+                 Text='클릭: 앱에서 열기 + 읽음 · 섹션 줄 클릭: 접기 · Ctrl / Shift 클릭: 여러 개 고르기 · 오른쪽 클릭: 강조 · 미루기 · 확인 끝 · 위젯에서 빼기 · 알람 · 메모'/>
       <Border x:Name='SelBar' DockPanel.Dock='Bottom' Margin='6,4,6,2' Padding='8,6,6,6' CornerRadius='6'
               Background='#33508CFF' BorderBrush='#808FB8FF' BorderThickness='1' Visibility='Collapsed'>
         <StackPanel>
@@ -214,13 +234,22 @@ namespace SessionWidget
           <WrapPanel>
             <Button x:Name='SelDone' Content='✓ 확인 끝' Margin='0,0,4,4'/>
             <Button x:Name='SelHold' Content='⏸ 미루기' Margin='0,0,4,4'/>
-            <Button x:Name='SelUp' Content='⬆ 목록으로' ToolTip='미루기 · 확인 끝을 풀고 목록으로 되돌림' Margin='0,0,4,4'/>
+            <Button x:Name='SelUp' Content='⬆ 목록으로' ToolTip='위젯에 올리고, 미루기 · 확인 끝을 풀어 목록으로 되돌림' Margin='0,0,4,4'/>
+            <Button x:Name='SelOff' Content='－ 위젯에서 빼기' ToolTip='「위젯에 없는 것」 칸으로' Margin='0,0,4,4'/>
             <Button x:Name='SelRead' Content='읽음으로' Margin='0,0,4,4'/>
             <Button x:Name='SelStar' Content='★ 강조' Margin='0,0,4,4'/>
             <Button x:Name='SelAll' Content='목록 전부 고르기' ToolTip='Ctrl+A' Margin='0,0,4,4'/>
             <Button x:Name='SelClear' Content='고르기 끝' ToolTip='Esc' Margin='0,0,4,4'/>
           </WrapPanel>
         </StackPanel>
+      </Border>
+      <!-- 맨 아래 칸 탭: 누르면 목록 맨 아래에 그 칸이 펼쳐지고 그리로 스크롤 -->
+      <Border x:Name='FoldRow' DockPanel.Dock='Bottom' Margin='8,4,8,0' BorderBrush='#26FFFFFF' BorderThickness='0,1,0,0' Padding='0,5,0,0'>
+        <WrapPanel>
+          <Button x:Name='BtnDone' Margin='0,0,4,0' ToolTip='✓ 확인 끝: 새 대화가 시작되거나 새 답이 오면 다시 올라옴 · 펼치기 / 접기'/>
+          <Button x:Name='BtnHeld' Margin='0,0,4,0' ToolTip='⏸ 미룬 것(일단 보류): 「미루기 풀기」 할 때까지 접혀 있음 · 펼치기 / 접기'/>
+          <Button x:Name='BtnOff' Margin='0,0,4,0' ToolTip='위젯에 올리지 않은 세션: 오른쪽 클릭 「위젯에 올리기」 · 펼치기 / 접기'/>
+        </WrapPanel>
       </Border>
       <ScrollViewer VerticalScrollBarVisibility='Auto' Margin='6,0,4,0'>
         <StackPanel x:Name='List'/>
@@ -235,6 +264,7 @@ namespace SessionWidget
             dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), Config.ShareDirUnderHome);
             sessionsFile = Path.Combine(dir, "sessions.json");
             metaFile = Path.Combine(dir, "meta.json");
+            viewFile = Path.Combine(dir, "view.json");
             exePath = Assembly.GetExecutingAssembly().Location;
             settingsFile = Path.Combine(Path.GetDirectoryName(exePath), "widget-settings.json");
 
@@ -253,8 +283,8 @@ namespace SessionWidget
             LoadSettings();
 
             header.MouseLeftButtonDown += (s, e) => { try { Window.DragMove(); } catch { } };
-            btnHeld.Click += (s, e) => { showHeld = !showHeld; SaveSettings(); Render(); };
-            btnDone.Click += (s, e) => { showDone = !showDone; SaveSettings(); Render(); };
+            btnHeld.Click += (s, e) => { showHeld = !showHeld; SaveSettings(); Render(); if (showHeld) ShowSection("held"); };
+            btnDone.Click += (s, e) => { showDone = !showDone; SaveSettings(); Render(); if (showDone) ShowSection("done"); };
             btnPin.Click += (s, e) => { Window.Topmost = !Window.Topmost; SaveSettings(); Render(); };
 
             btnSelect = (Button)Window.FindName("BtnSelect");
@@ -268,6 +298,12 @@ namespace SessionWidget
             ((Button)Window.FindName("SelStar")).Click += (s, e) => Bulk("star");
             ((Button)Window.FindName("SelAll")).Click += (s, e) => SelectAllMain();
             ((Button)Window.FindName("SelClear")).Click += (s, e) => EndSelect();
+            ((Button)Window.FindName("SelOff")).Click += (s, e) => Bulk("unboard");
+            btnOff = (Button)Window.FindName("BtnOff");
+            foldRow = (FrameworkElement)Window.FindName("FoldRow");
+            btnBoardView = (Button)Window.FindName("BtnBoardView");
+            btnBoardView.Click += (s, e) => BoardViewing();
+            btnOff.Click += (s, e) => { showOff = !showOff; SaveSettings(); Render(); if (showOff) ShowSection("off"); };
             Window.PreviewKeyDown += (s, e) =>
             {
                 if (e.Key == Key.Escape && (selectMode || selected.Count > 0)) { EndSelect(); e.Handled = true; }
@@ -373,6 +409,10 @@ namespace SessionWidget
             if (d.ContainsKey("Topmost")) Window.Topmost = d["Topmost"] is bool && (bool)d["Topmost"];
             showHeld = d.ContainsKey("showHeld") && d["showHeld"] is bool && (bool)d["showHeld"];
             showDone = d.ContainsKey("showDone") && d["showDone"] is bool && (bool)d["showDone"];
+            showOff = d.ContainsKey("showOff") && d["showOff"] is bool && (bool)d["showOff"];
+            boardInit = d.ContainsKey("boardInit") && d["boardInit"] is bool && (bool)d["boardInit"];
+            knownIds = StrSet(Get(d, "knownIds"));
+            collapsedGroups = StrSet(Get(d, "collapsedGroups"));
 
             // 모니터 구성이 바뀌어 화면 밖이면 오른쪽 위로
             var vs = new Rect(SystemParameters.VirtualScreenLeft, SystemParameters.VirtualScreenTop,
@@ -395,7 +435,20 @@ namespace SessionWidget
             d["Topmost"] = Window.Topmost;
             d["showHeld"] = showHeld;
             d["showDone"] = showDone;
+            d["showOff"] = showOff;
+            d["boardInit"] = boardInit;
+            d["knownIds"] = knownIds.OrderBy(x => x, StringComparer.Ordinal).ToList();
+            d["collapsedGroups"] = collapsedGroups.OrderBy(x => x, StringComparer.Ordinal).ToList();
             WriteJson(settingsFile, d);
+        }
+
+        static HashSet<string> StrSet(object o)
+        {
+            var set = new HashSet<string>();
+            var arr = o as IEnumerable;
+            if (arr == null || o is string) return set;
+            foreach (var x in arr) if (x is string) set.Add((string)x);
+            return set;
         }
 
         // ---------- 파일 ----------
@@ -549,8 +602,14 @@ namespace SessionWidget
         /// ⏸ 미루기(일단 보류): 사용자가 풀 때까지. 단, 리마인드가 울리면 목록에 나온다
         static bool IsHeld(Session s, Dictionary<string, object> m)
         {
-            return Str(m, "heldAt") != "" && !IsDue(m);
+            return IsOn(m) && Str(m, "heldAt") != "" && !IsDue(m);
         }
+
+        /// 위젯에 올린 세션인가
+        static bool IsOn(Dictionary<string, object> m) { return Bool(m, "board"); }
+
+        /// 목록 본문(섹션별)에 나오는가
+        static bool InMain(Session s, Dictionary<string, object> m) { return IsOn(m) && !IsHidden(s, m); }
 
         /// 미룬 뒤로 새 답이 왔는가(접힌 칸에 표시만)
         static bool HeldNew(Session s, Dictionary<string, object> m)
@@ -562,7 +621,7 @@ namespace SessionWidget
         /// ✓ 확인 끝: 그 뒤로 새 활동(새 대화 · 새 답)이 없는 동안만
         static bool IsDone(Session s, Dictionary<string, object> m)
         {
-            if (Str(m, "heldAt") != "") return false;
+            if (!IsOn(m) || Str(m, "heldAt") != "") return false;
             string at = Str(m, "hiddenAt");
             return at != "" && string.CompareOrdinal(s.LastActivityAt, at) <= 0;
         }
@@ -629,6 +688,7 @@ namespace SessionWidget
                                     IsRunning = Bool(r, "isRunning"),
                                     Remote = Bool(r, "remote"),
                                     Needs = Bool(r, "needs"),
+                                    Group = Str(r, "group"),
                                 });
                             }
                         }
@@ -639,8 +699,9 @@ namespace SessionWidget
                             {
                                 bool was;
                                 // 미룬 세션은 알리지 않는다(접힌 칸에 「새 답 있음」만)
+                                // 위젯에 올리지 않은 세션도 알리지 않는다
                                 if (prevRunning.TryGetValue(s.Id, out was) && was && !s.IsRunning &&
-                                    Str(MetaOf(s.Id), "heldAt") == "")
+                                    Str(MetaOf(s.Id), "heldAt") == "" && IsOn(MetaOf(s.Id)))
                                 {
                                     if (IsNeeds(s)) Alert("🙋 확인 필요", s.Title + (s.Ask != "" ? "\n→ " + s.Ask : ""), true);
                                     else Alert("💬 답 왔음", s.Title, false);
@@ -662,11 +723,29 @@ namespace SessionWidget
                 if (t != metaTime) { metaTime = t; meta = LoadMeta(); changed = true; }
             }
 
+            if (File.Exists(viewFile))
+            {
+                var t = File.GetLastWriteTimeUtc(viewFile);
+                if (t != viewTime)
+                {
+                    var v = ReadJson(viewFile) as Dictionary<string, object>;
+                    if (v != null)
+                    {
+                        viewTime = t;
+                        viewFocused = Str(v, "focused");
+                        viewVisible = StrSet(Get(v, "visible"));
+                        changed = true;
+                    }
+                }
+            }
+
+            if (changed && EnsureBoard()) changed = true;
+
             // 리마인드: 이 위젯에서 아직 안 울린 것
             foreach (var s in sessions)
             {
                 var m = MetaOf(s.Id);
-                if (!IsDue(m)) continue;
+                if (!IsDue(m) || !IsOn(m)) continue;
                 string key = s.Id + "|" + Long(m, "remindAt");
                 if (alerted.Contains(key)) continue;
                 alerted.Add(key);
@@ -676,6 +755,33 @@ namespace SessionWidget
             }
 
             if (changed || NowMs() - lastRender > 30000) Render();
+        }
+
+        /// 처음 한 번: 지금 있는 세션을 전부 올린 것으로(화면이 그대로). 그 뒤로는 처음 보는 세션을 저절로 올림
+        bool EnsureBoard()
+        {
+            if (sessions.Count == 0) return false;
+            List<Session> add;
+            if (!boardInit)
+                add = sessions.ToList(); // 지금 보이는 모양 그대로(미룬 것 · 확인 끝 칸 포함) 이어 가기
+            else
+                add = sessions.Where(x => !knownIds.Contains(x.Id)).ToList();
+            bool firstTime = !boardInit;
+            foreach (var x in sessions) knownIds.Add(x.Id);
+            boardInit = true;
+            if (add.Count > 0)
+            {
+                var map = LoadMeta();
+                foreach (var x in add)
+                {
+                    if (!map.ContainsKey(x.Id)) map[x.Id] = new Dictionary<string, object>();
+                    map[x.Id]["board"] = true;
+                }
+                try { WriteJson(metaFile, map); meta = map; }
+                catch (Exception ex) { subLine.Text = "표시 저장 실패: " + ex.Message; }
+            }
+            if (add.Count > 0 || firstTime) SaveSettings();
+            return add.Count > 0;
         }
 
         // ---------- 그리기 ----------
@@ -696,9 +802,30 @@ namespace SessionWidget
             btnHeld.Visibility = heldCount > 0 ? Visibility.Visible : Visibility.Collapsed;
             btnDone.Content = (showDone ? "▾ " : "▸ ") + "✓ 확인 끝 " + doneCount;
             btnDone.Visibility = doneCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+            int offCount = sessions.Count(s => !IsOn(MetaOf(s.Id)));
+            btnOff.Content = (showOff ? "▾ " : "▸ ") + "＋ 위젯에 없는 것 " + offCount;
+            btnOff.Visibility = offCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+            foldRow.Visibility = (offCount > 0 || heldCount > 0 || doneCount > 0) ? Visibility.Visible : Visibility.Collapsed;
+            var viewing = sessions.FirstOrDefault(x => x.Id == viewFocused);
+            if (viewing == null)
+            {
+                btnBoardView.Content = "👁 지금 보는 세션 올리기";
+                btnBoardView.ToolTip = "앱에서 보고 있는 세션을 아직 모릅니다(앱 창에 세션을 띄우면 알게 됨)";
+                btnBoardView.IsEnabled = false;
+                btnBoardView.Opacity = 0.5;
+            }
+            else
+            {
+                bool there = InMain(viewing, MetaOf(viewing.Id));
+                btnBoardView.Content = there ? "👁 지금 보는 세션으로 가기" : "👁 지금 보는 세션 올리기";
+                btnBoardView.ToolTip = (there ? "위젯 목록에서 그 카드로 이동" : "위젯에 올리고(미루기 · 확인 끝도 풀고) 그 카드로 이동")
+                    + "\n앱에서 보는 세션: " + viewing.Title;
+                btnBoardView.IsEnabled = true;
+                btnBoardView.Opacity = 1;
+            }
             btnPin.Content = Window.Topmost ? "📌" : "📍";
 
-            var visible = sessions.Where(s => !IsHidden(s, MetaOf(s.Id))).ToList();
+            var visible = sessions.Where(s => InMain(s, MetaOf(s.Id))).ToList();
             int running = visible.Count(s => s.IsRunning);
             int unread = visible.Count(s => IsUnread(s, MetaOf(s.Id)));
             int due = visible.Count(s => IsDue(MetaOf(s.Id)));
@@ -732,30 +859,86 @@ namespace SessionWidget
             selected.RemoveWhere(x => !alive.Contains(x));
             UpdateSelBar();
             renderOrder = new List<string>();
+            cardById = new Dictionary<string, Border>();
+            sectionById = new Dictionary<string, FrameworkElement>();
 
             list.Children.Clear();
             var sorted = sessions
                 .OrderBy(s => Rank(s, MetaOf(s.Id)))
                 .ThenByDescending(s => s.LastActivityAt, StringComparer.Ordinal)
                 .ToList();
-            foreach (var s in sorted)
+            // 본문: 앱 사이드바 섹션별로 묶고(섹션 없음은 맨 아래), 섹션 안은 급한 순
+            var groups = sorted.Where(x => InMain(x, MetaOf(x.Id)))
+                .GroupBy(x => x.Group)
+                .OrderBy(g => g.Key == "" ? 1 : 0)
+                .ThenBy(g => g.Key, StringComparer.CurrentCulture)
+                .ToList();
+            foreach (var g in groups)
             {
-                var m = MetaOf(s.Id);
-                if (!IsHidden(s, m)) list.Children.Add(MakeCard(s, m, "main"));
+                string key = g.Key;
+                bool folded = collapsedGroups.Contains(key);
+                int gNeeds = g.Count(x => IsNeeds(x));
+                int gUnread = g.Count(x => IsUnread(x, MetaOf(x.Id)));
+                int gRun = g.Count(x => x.IsRunning);
+                var head = GroupLine((folded ? "▸ " : "▾ ") + (key == "" ? "섹션 없음" : key) + "  " + g.Count()
+                    + (gNeeds > 0 ? " · 🙋 " + gNeeds : "") + (gUnread > 0 ? " · 💬 " + gUnread : "") + (gRun > 0 ? " · ● " + gRun : ""));
+                head.MouseLeftButtonUp += (o, e) =>
+                {
+                    if (!collapsedGroups.Remove(key)) collapsedGroups.Add(key);
+                    SaveSettings();
+                    Render();
+                };
+                list.Children.Add(head);
+                if (folded) continue;
+                foreach (var s in g) list.Children.Add(MakeCard(s, MetaOf(s.Id), "main"));
             }
+            if (groups.Count == 0 && updatedAtMs != 0)
+                list.Children.Add(SectionLine("위젯에 올린 세션이 없습니다 — 「＋ 위젯에 없는 것」에서 올리세요"));
 
             if (showHeld && heldCount > 0)
             {
-                list.Children.Add(SectionLine("⏸ 미룬 것 — 「미루기 풀기」 할 때까지 여기 · 알림 없음 · 리마인드는 울림"));
+                var sec_held = SectionLine("⏸ 미룬 것 — 「미루기 풀기」 할 때까지 여기 · 알림 없음 · 리마인드는 울림");
+                sectionById["held"] = sec_held;
+                list.Children.Add(sec_held);
                 foreach (var s in sorted.Where(x => IsHeld(x, MetaOf(x.Id))))
                     list.Children.Add(MakeCard(s, MetaOf(s.Id), "held"));
             }
             if (showDone && doneCount > 0)
             {
-                list.Children.Add(SectionLine("✓ 확인 끝 — 새 대화가 시작되거나 새 답이 오면 다시 올라옴"));
+                var sec_done = SectionLine("✓ 확인 끝 — 새 대화가 시작되거나 새 답이 오면 다시 올라옴");
+                sectionById["done"] = sec_done;
+                list.Children.Add(sec_done);
                 foreach (var s in sorted.Where(x => IsDone(x, MetaOf(x.Id))))
                     list.Children.Add(MakeCard(s, MetaOf(s.Id), "done"));
             }
+            if (showOff && offCount > 0)
+            {
+                var sec_off = SectionLine("＋ 위젯에 없는 것 — 오른쪽 클릭 「위젯에 올리기」 · 여러 개 골라 한꺼번에도 됨");
+                sectionById["off"] = sec_off;
+                list.Children.Add(sec_off);
+                foreach (var s in sessions.Where(x => !IsOn(MetaOf(x.Id)))
+                                          .OrderByDescending(x => x.LastActivityAt, StringComparer.Ordinal))
+                    list.Children.Add(MakeCard(s, MetaOf(s.Id), "off"));
+            }
+        }
+
+        /// 섹션 이름 줄(누르면 접고 펼침)
+        static Border GroupLine(string text)
+        {
+            var t = new TextBlock();
+            t.Text = text;
+            t.TextWrapping = TextWrapping.Wrap;
+            t.Foreground = B("#DDFFFFFF");
+            t.FontSize = 11.5;
+            t.FontWeight = FontWeights.Bold;
+            var b = new Border();
+            b.Child = t;
+            b.Background = B("#0FFFFFFF");
+            b.CornerRadius = new CornerRadius(4);
+            b.Padding = new Thickness(6, 3, 6, 3);
+            b.Margin = new Thickness(0, 4, 0, 4);
+            b.Cursor = Cursors.Hand;
+            return b;
         }
 
         static TextBlock SectionLine(string text)
@@ -770,7 +953,7 @@ namespace SessionWidget
             return t;
         }
 
-        /// kind: main(목록) · held(미룬 것) · done(확인 끝)
+        /// kind: main(목록) · held(미룬 것) · done(확인 끝) · off(위젯에 없는 것)
         Border MakeCard(Session s, Dictionary<string, object> m, string kind)
         {
             bool isLowered = kind != "main";
@@ -797,7 +980,7 @@ namespace SessionWidget
             card.Padding = new Thickness(8, 5, 8, 5);
             card.Cursor = Cursors.Hand;
             card.ToolTip = s.Title;
-            if (isLowered) card.Opacity = kind == "held" ? 0.7 : 0.45;
+            if (isLowered) card.Opacity = kind == "held" ? 0.7 : kind == "off" ? 0.55 : 0.45;
             if (isPicked)
             {
                 // 고른 카드: 파란 바탕 + 테두리, 흐린 칸에 있어도 또렷하게
@@ -806,6 +989,15 @@ namespace SessionWidget
                 card.BorderThickness = new Thickness(3, 1, 1, 1);
                 card.Opacity = 1;
             }
+            // 앱 메인 창에서 포커스가 있는 세션: 하늘색 굵은 테두리(분할 칸 · 따로 띄운 창은 표시 안 함)
+            bool isViewing = s.Id == viewFocused;
+            if (isViewing)
+            {
+                card.BorderBrush = B(Config.ColorViewing);
+                card.BorderThickness = new Thickness(3, 2, 2, 2);
+                card.Opacity = 1;
+            }
+            cardById[s.Id] = card;
 
             var stack = new StackPanel();
 
@@ -831,6 +1023,13 @@ namespace SessionWidget
             line.Inlines.Add(r1);
             line.Inlines.Add(r2);
             line.Inlines.Add(r3);
+            if (isViewing)
+            {
+                var r4 = new Run(" · 👁 보는 중");
+                r4.Foreground = B(Config.ColorViewing);
+                r4.FontWeight = FontWeights.Bold;
+                line.Inlines.Add(r4);
+            }
             stack.Children.Add(line);
 
             if (kind == "held" && HeldNew(s, m)) stack.Children.Add(SmallLine("💬 미룬 뒤 새 답 있음", Config.ColorUnread, true));
@@ -858,7 +1057,8 @@ namespace SessionWidget
                 menu.Items.Add(head);
                 AddItem(menu, "✓ 확인 끝", () => Bulk("done"));
                 AddItem(menu, "⏸ 미루기 (일단 보류)", () => Bulk("hold"));
-                AddItem(menu, "⬆ 목록으로 (미루기 · 확인 끝 풀기)", () => Bulk("up"));
+                AddItem(menu, "⬆ 목록으로 (위젯에 올리고 미루기 · 확인 끝 풀기)", () => Bulk("up"));
+                AddItem(menu, "－ 위젯에서 빼기", () => Bulk("unboard"));
                 AddItem(menu, "읽음으로", () => Bulk("read"));
                 AddItem(menu, "★ 강조 / 해제", () => Bulk("star"));
                 menu.Items.Add(new Separator());
@@ -868,12 +1068,22 @@ namespace SessionWidget
                 return card;
             }
             AddItem(menu, "앱에서 열기", () => DoAction("open", id));
+            if (kind == "off")
+            {
+                AddItem(menu, "＋ 위젯에 올리기", () => DoAction("board", id));
+                menu.Items.Add(new Separator());
+                AddItem(menu, "📝 메모…", () => DoAction("memo", id));
+                card.ContextMenu = menu;
+                card.MouseLeftButtonUp += (o, e) => OnCardClick(id);
+                return card;
+            }
             AddItem(menu, star ? "강조 해제" : "★ 강조", () => DoAction("star", id));
             AddItem(menu, unreadNow ? "읽음으로" : "안 읽음으로", () => DoAction("read", id));
             menu.Items.Add(new Separator());
             bool held = Str(m, "heldAt") != "";
             AddItem(menu, held ? "⬆ 미루기 풀기" : "⏸ 미루기 (일단 보류)", () => DoAction(held ? "unhold" : "hold", id));
             AddItem(menu, kind == "done" ? "⬆ 다시 올리기" : "✓ 확인 끝", () => DoAction(kind == "done" ? "undone" : "done", id));
+            AddItem(menu, "－ 위젯에서 빼기", () => DoAction("unboard", id));
             menu.Items.Add(new Separator());
             AddItem(menu, "⏰ 30분 뒤", () => DoAction("remind30", id));
             AddItem(menu, "⏰ 1시간 뒤", () => DoAction("remind60", id));
@@ -886,6 +1096,32 @@ namespace SessionWidget
 
             card.MouseLeftButtonUp += (o, e) => OnCardClick(id);
             return card;
+        }
+
+        /// 펼친 칸의 머리 줄로 스크롤(그리기가 끝난 뒤)
+        void ShowSection(string key)
+        {
+            FrameworkElement el;
+            if (!sectionById.TryGetValue(key, out el)) return;
+            Window.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                el.BringIntoView(new Rect(0, 0, el.ActualWidth, Math.Max(el.ActualHeight, 400)));
+            }), DispatcherPriority.Loaded);
+        }
+
+        /// 앱에서 보고 있는 세션을 위젯에 올리고(미루기 · 확인 끝도 풀고) 그 카드로 스크롤
+        void BoardViewing()
+        {
+            var s = sessions.FirstOrDefault(x => x.Id == viewFocused);
+            if (s == null) return;
+            string id = s.Id;
+            collapsedGroups.Remove(s.Group);
+            if (!InMain(s, MetaOf(id)))
+                ChangeMeta(id, m => { m["board"] = true; m["heldAt"] = null; m["hiddenAt"] = null; });
+            SaveSettings();
+            Render();
+            Border card;
+            if (cardById.TryGetValue(id, out card)) card.BringIntoView();
         }
 
         // ---------- 여러 개 고르기 ----------
@@ -917,7 +1153,7 @@ namespace SessionWidget
         void SelectAllMain()
         {
             foreach (var s in sessions)
-                if (!IsHidden(s, MetaOf(s.Id))) selected.Add(s.Id);
+                if (InMain(s, MetaOf(s.Id))) selected.Add(s.Id);
             selectMode = true;
             Render();
         }
@@ -955,7 +1191,8 @@ namespace SessionWidget
                 {
                     case "done": m["hiddenAt"] = s.LastActivityAt; m.Remove("heldAt"); break;
                     case "hold": m["heldAt"] = s.LastActivityAt; m.Remove("hiddenAt"); break;
-                    case "up": m.Remove("heldAt"); m.Remove("hiddenAt"); break;
+                    case "up": m["board"] = true; m.Remove("heldAt"); m.Remove("hiddenAt"); break;
+                    case "unboard": m.Remove("board"); break;
                     case "read": if (!s.IsRunning) m["seenAt"] = s.LastActivityAt; break;
                     case "star": if (starAll) m["star"] = true; else m.Remove("star"); break;
                 }
@@ -1004,7 +1241,9 @@ namespace SessionWidget
                     {
                         try { Process.Start(s.Link); } catch { }
                     }
+                    viewFocused = id;
                     if (!s.IsRunning) ChangeMeta(id, m => { m["seenAt"] = iso; });
+                    else Render();
                     break;
                 case "star":
                     ChangeMeta(id, m => { m["star"] = !Bool(m, "star"); });
@@ -1022,6 +1261,12 @@ namespace SessionWidget
                     break;
                 case "done":
                     ChangeMeta(id, m => { m["hiddenAt"] = iso; m["heldAt"] = null; });
+                    break;
+                case "board":
+                    ChangeMeta(id, m => { m["board"] = true; m["heldAt"] = null; m["hiddenAt"] = null; });
+                    break;
+                case "unboard":
+                    ChangeMeta(id, m => { m["board"] = null; });
                     break;
                 case "undone":
                     ChangeMeta(id, m => { m["hiddenAt"] = null; });

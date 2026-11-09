@@ -1,4 +1,5 @@
 // 주기 작업: 대표 세션 선출 → 앱에서 세션 목록 읽기 → 확인 필요 판단 → 위젯용 sessions.json 쓰기 → 알림
+// 짧은 주기(VIEW_MS)로는 앱 창에서 보고 있는 세션을 view.json 에 쓴다(위젯이 그 카드에 테두리).
 //
 // 모든 세션에 실린다. 그중 대표 세션 하나(leader.json)만 목록을 읽고 판단하고 파일을 쓴다.
 // 나머지 세션은 그 파일만 읽어 패널 · 상태 줄을 맞춘다.
@@ -25,7 +26,7 @@ import {
   setSessions,
 } from './store'
 
-export const PLUGIN_VERSION = '0.2.0'
+export const PLUGIN_VERSION = '0.3.0'
 
 type RawSession = {
   sessionId?: string
@@ -34,6 +35,8 @@ type RawSession = {
   lastActivityAt?: string
   link?: string
   remoteControlActive?: boolean
+  /** 앱 사이드바 섹션 */
+  group?: { id?: string; name?: string } | null
 }
 
 function toRow(raw: RawSession, isSelf: boolean): BoardSession | undefined {
@@ -46,11 +49,15 @@ function toRow(raw: RawSession, isSelf: boolean): BoardSession | undefined {
     isSelf,
     remote: !!raw.remoteControlActive,
     ...(raw.link ? { link: raw.link } : {}),
+    ...(raw.group?.name ? { group: raw.group.name } : {}),
   }
 }
 
 // 겹쳐 돌지 않게 (다시 불러오면 처음부터)
 let polling = false
+// 이 세션이 지금 대표인가(pollOnce 가 정함) · 마지막으로 쓴 view.json 내용
+let isLeaderNow = false
+let lastView = ''
 
 export async function poll($: EngineInterface) {
   if (polling) return
@@ -120,9 +127,41 @@ async function exportSessions($: EngineInterface, now: number, error: string) {
   }
 }
 
+/** 앱 창에서 보고 있는 세션: focused = 포커스 칸, visible = 화면에 떠 있는 세션 전부(분할 · 따로 띄운 창). 대표만 쓴다 */
+export async function pollView($: EngineInterface) {
+  if (!isLeaderNow) return
+  try {
+    const r = await $.mcp.call('ccd_window', 'get_window_layout', {})
+    const block = r.content.find(b => b.type === 'text') as { text?: string } | undefined
+    if (r.isError || !block?.text) return
+    const layout = JSON.parse(block.text) as {
+      main_window?: { tab?: string; panes?: { kind?: string; session_id?: string; focused?: boolean }[] }
+      popout_windows?: { sessions?: unknown[] }
+    }
+    const panes = layout.main_window?.panes ?? []
+    const idOf = (x: unknown): string =>
+      typeof x === 'string' ? x : typeof x === 'object' && x && typeof (x as { session_id?: unknown }).session_id === 'string'
+        ? String((x as { session_id: string }).session_id) : ''
+    const focused = layout.main_window?.tab === 'code'
+      ? (panes.find(p => p.focused && p.session_id)?.session_id ?? '') : ''
+    const visible = [
+      ...panes.map(p => p.session_id ?? ''),
+      ...(layout.popout_windows?.sessions ?? []).map(idOf),
+    ].filter(x => x !== '')
+    const body = JSON.stringify({ focused, visible: [...new Set(visible)] })
+    if (body === lastView) return
+    lastView = body
+    const p = await getPaths($)
+    await $.fs.write(p.viewFile, body)
+  } catch {
+    // 창 정보를 못 읽으면 이번엔 그냥 넘어간다
+  }
+}
+
 async function pollOnce($: EngineInterface) {
   const now = await $.clock.now()
-  if (!(await amLeader($, now))) {
+  isLeaderNow = await amLeader($, now)
+  if (!isLeaderNow) {
     await followFiles($)
     await refreshStatus($)
     return
