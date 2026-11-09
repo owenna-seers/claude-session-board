@@ -1,0 +1,6 @@
+{
+  "name": "session-board",
+  "description": "세션 현황판 — Claude 앱 Code 세션 현황을 윈도우 위젯으로",
+  "owner": { "name": "owenna-seers" },
+  "plugins": [{ "name": "session-board", "source": "./" }]
+}

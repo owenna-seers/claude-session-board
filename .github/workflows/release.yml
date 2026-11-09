@@ -1,0 +1,23 @@
+# 태그(v*)를 밀면 윈도우 러너에서 위젯을 빌드해 Releases 에 SessionWidget.exe 를 붙인다.
+# 서명은 하지 않는다 — 받는 사람은 SmartScreen 「추가 정보 → 실행」.
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  widget:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build widget
+        shell: pwsh
+        run: |
+          .\widget\src\build.ps1 -Out "$env:GITHUB_WORKSPACE\dist\SessionWidget.exe"
+      - name: Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$env:GITHUB_REF_NAME" "dist\SessionWidget.exe" --title "$env:GITHUB_REF_NAME" --generate-notes

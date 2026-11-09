@@ -1,0 +1,14 @@
+# 빌드 결과 · 이 PC 에서만 뜻 있는 것
+*.exe
+widget/src/app.ico
+widget-settings.json
+*.tmp
+*.log
+
+# 엔진이 플러그인을 실을 때 옆에 써 주는 타입(편집기용)
+.claude-plugin/types/
+
+# 편집기 · OS
+.DS_Store
+Thumbs.db
+*.swp
