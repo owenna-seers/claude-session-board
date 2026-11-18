@@ -23,14 +23,14 @@ export const JUDGE_WITHIN_MS = 3 * 24 * 3600_000
 export const JUDGE_PER_POLL = 4
 
 /** 판단 기준(judge-prompt.ts)을 바꾸면 이 이름을 올린다 → 전부 다시 판단 */
-export const JUDGED_KEY = 'judged-4'
+export const JUDGED_KEY = 'judged-5'
 
 /**
  * 코드 판. 판단 · 대표 방식을 고칠 때마다 올린다.
  * 플러그인 코드는 세션이 시작될 때 실리므로, 고치기 전에 열린 세션은 옛 코드로 돈다.
  * 판이 높은 세션이 옛 판 대표의 자리를 넘겨받아, 고친 판단이 바로 위젯에 나온다.
  */
-export const LEADER_V = 6
+export const LEADER_V = 7
 
 /** 대표 세션이 이 시간(ms) 넘게 소식이 없으면 다른 세션이 이어받는다 */
 export const LEADER_STALE_MS = 15_000

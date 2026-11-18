@@ -1,7 +1,8 @@
 // 확인 필요 판단
 //  1순위: 세션의 마지막 턴이 다음 단계 상자(wrap_up)에 남긴 질문(ask) — 앱 세션 파일 → 세션 기록 jsonl 끝에서 읽는다
-//  2순위: 마지막 답 글을 모델(JUDGE_MODEL)에게 보여 판단
-//  3순위: 낱말 어림(GUESS_RE)
+//  2순위: 앱이 마지막 턴에 매긴 요약(postTurnSummary.needs_action)이 비어 있으면 확인 필요 아님
+//  3순위: 마지막 답 글을 모델(JUDGE_MODEL)에게 보여 판단
+//  4순위: 낱말 어림(GUESS_RE)
 
 import type { EngineInterface } from 'claude-code'
 
@@ -76,8 +77,7 @@ async function appSessionFile($: EngineInterface, id: string): Promise<Record<st
  * 마지막 턴에 wrap_up 이 없거나 질문이 없으면 undefined.
  * 기록은 수십 MB 라 $.fs.read(4 MiB 한도)로 못 읽어, tail.ps1 로 끝 부분만 읽는다.
  */
-async function lastTurnAsk($: EngineInterface, id: string): Promise<string | undefined> {
-  const app = await appSessionFile($, id)
+async function lastTurnAsk($: EngineInterface, app: Record<string, unknown> | undefined): Promise<string | undefined> {
   if (!app) return undefined
   const cli = String(app.lastAssistantCliSessionId ?? app.cliSessionId ?? '')
   if (!cli) return undefined
@@ -127,15 +127,39 @@ async function lastTurnAsk($: EngineInterface, id: string): Promise<string | und
   return ask
 }
 
-async function judge($: EngineInterface, s: BoardSession): Promise<BoardJudged> {
+/** 앱이 그 세션의 마지막 턴에 매긴 요약(postTurnSummary)의 「사용자가 할 일」. 마지막 턴 요약이 아니면 undefined */
+function appNeedsAction(app: Record<string, unknown> | undefined): string | undefined {
+  const sum = app?.postTurnSummary as { summarizes_uuid?: unknown; needs_action?: unknown } | undefined
+  if (!sum || !app?.lastAssistantUuid || sum.summarizes_uuid !== app.lastAssistantUuid) return undefined
+  return typeof sum.needs_action === 'string' ? sum.needs_action.trim() : undefined
+}
+
+/** 앱이 턴 요약을 아직 쓰는 중일 수 있는 시간: 이 안이면 판단을 미루고 다음 갱신 때 다시 */
+const SUMMARY_WAIT_MS = 90_000
+
+async function judge($: EngineInterface, s: BoardSession): Promise<BoardJudged | undefined> {
+  let app: Record<string, unknown> | undefined
+  try {
+    app = await appSessionFile($, s.id)
+  } catch {
+    app = undefined
+  }
   // 1) 다음 단계 상자에 질문이 있으면 그대로 확인 필요
   try {
-    const ask = await lastTurnAsk($, s.id)
+    const ask = await lastTurnAsk($, app)
     if (ask) return { at: s.lastActivityAt, needs: true, ask: ask.slice(0, 80) }
   } catch {
-    // 아래 글 판단으로
+    // 아래로
   }
-  // 2) 없으면 마지막 답 글을 읽고 판단
+  // 2) 앱이 마지막 턴에 매긴 요약에 「사용자가 할 일」이 비어 있으면 확인 필요 아님.
+  //    보고서 안의 의문문(검토 결과의 「참고」 질문 등)을 모델이 질문으로 잘못 읽는 것을 막는다(하위 세션의 검토 보고 등)
+  const action = appNeedsAction(app)
+  if (action === '') return { at: s.lastActivityAt, needs: false, ask: '' }
+  if (action === undefined && app?.classifierSummaryEnabled === true) {
+    const edge = Number(app.lastTurnEdgeAt ?? 0)
+    if (edge > 0 && Date.now() - edge < SUMMARY_WAIT_MS) return undefined
+  }
+  // 3) 그 밖에는 마지막 답 글을 읽고 판단(앱 요약에 할 일이 있어도 모델이 한 번 더 거른다)
   const transcript = await callText($, 'list_events', { session_id: s.id, limit: 12 })
   const text = lastAssistantText(transcript)
   if (!text) return { at: s.lastActivityAt, needs: false, ask: '' }
@@ -161,7 +185,7 @@ async function judge($: EngineInterface, s: BoardSession): Promise<BoardJudged> 
       }
     }
   }
-  // 3) 낱말 어림
+  // 4) 낱말 어림
   const needs = guess(text)
   return { at: s.lastActivityAt, needs, ask: needs ? GUESS_ASK : '' }
 }
@@ -178,7 +202,7 @@ export async function judgeSome($: EngineInterface, sessions: BoardSession[], no
   for (const s of todo) {
     try {
       const j = await judge($, s)
-      judged = { ...judged, [s.id]: j }
+      if (j) judged = { ...judged, [s.id]: j }
     } catch {
       // 이번엔 건너뛰고 다음 갱신 때 다시
     }
