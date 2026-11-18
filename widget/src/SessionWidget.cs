@@ -32,8 +32,8 @@ using WinForms = System.Windows.Forms;
 [assembly: AssemblyProduct("세션 위젯")]
 [assembly: AssemblyDescription("Claude 세션 현황 위젯")]
 [assembly: AssemblyCompany("session-board")]
-[assembly: AssemblyVersion("1.4.1.0")]
-[assembly: AssemblyFileVersion("1.4.1.0")]
+[assembly: AssemblyVersion("1.5.0.0")]
+[assembly: AssemblyFileVersion("1.5.0.0")]
 
 namespace SessionWidget
 {
@@ -178,6 +178,75 @@ namespace SessionWidget
         }
     }
 
+
+    /// 화면 설정(톱니바퀴): 요소별 글씨 크기 · 시간 표기 · 보이기. widget-settings 의 "ui" 칸에 저장
+    static class Ui
+    {
+        public static double Title, Ask, Small, Section, Stat;
+        /// 줄 끝 시간: ago = 7시간 · abs = 시각 · both = 둘 다
+        public static string TimeMode;
+        /// 시각 모양: full = 26-11-18 18:10:50 · short = 11-18 18:10 · smart = 오늘이면 18:10, 아니면 11-18 18:10
+        public static string AbsFormat;
+        public static bool Tiles, Account, RemoteOff, CardButtons, FoldRead, Updated;
+
+        static Ui() { Reset(); }
+
+        public static void Reset()
+        {
+            Title = 12; Ask = 11.5; Small = 11; Section = 11; Stat = 19;
+            TimeMode = "ago"; AbsFormat = "smart";
+            Tiles = true; Account = true; RemoteOff = true; CardButtons = true; FoldRead = true; Updated = true;
+        }
+
+        public static void Load(Dictionary<string, object> d)
+        {
+            if (d == null) return;
+            Title = Num(d, "title", Title, 10, 18);
+            Ask = Num(d, "ask", Ask, 10, 16);
+            Small = Num(d, "small", Small, 9.5, 15);
+            Section = Num(d, "section", Section, 9.5, 15);
+            Stat = Num(d, "stat", Stat, 14, 28);
+            TimeMode = Pick(d, "timeMode", TimeMode, "ago", "abs", "both");
+            AbsFormat = Pick(d, "absFormat", AbsFormat, "full", "short", "smart");
+            Tiles = Flag(d, "tiles", Tiles);
+            Account = Flag(d, "account", Account);
+            RemoteOff = Flag(d, "remoteOff", RemoteOff);
+            CardButtons = Flag(d, "cardButtons", CardButtons);
+            FoldRead = Flag(d, "foldRead", FoldRead);
+            Updated = Flag(d, "updated", Updated);
+        }
+
+        public static Dictionary<string, object> Save()
+        {
+            var d = new Dictionary<string, object>();
+            d["title"] = Title; d["ask"] = Ask; d["small"] = Small; d["section"] = Section; d["stat"] = Stat;
+            d["timeMode"] = TimeMode; d["absFormat"] = AbsFormat;
+            d["tiles"] = Tiles; d["account"] = Account; d["remoteOff"] = RemoteOff;
+            d["cardButtons"] = CardButtons; d["foldRead"] = FoldRead; d["updated"] = Updated;
+            return d;
+        }
+
+        static double Num(Dictionary<string, object> d, string k, double def, double min, double max)
+        {
+            object v;
+            if (!d.TryGetValue(k, out v) || v == null) return def;
+            try { return Math.Max(min, Math.Min(max, Convert.ToDouble(v, CultureInfo.InvariantCulture))); }
+            catch { return def; }
+        }
+
+        static string Pick(Dictionary<string, object> d, string k, string def, params string[] ok)
+        {
+            object v;
+            return d.TryGetValue(k, out v) && v is string && Array.IndexOf(ok, (string)v) >= 0 ? (string)v : def;
+        }
+
+        static bool Flag(Dictionary<string, object> d, string k, bool def)
+        {
+            object v;
+            return d.TryGetValue(k, out v) && v is bool ? (bool)v : def;
+        }
+    }
+
     class Session
     {
         public string Id = "";
@@ -235,7 +304,12 @@ namespace SessionWidget
         string themeId = Config.DefaultTheme;
         double zoom = 1.0;
         FrameworkElement rootBorder;
-        Button btnTheme;
+        // 설정(톱니바퀴): 목록 자리에 겹쳐 여는 판
+        Button btnSettings;
+        FrameworkElement settingsPanel, tilesGrid;
+        StackPanel settingsBody;
+        ScrollViewer settingsScroll;
+        bool showSettings;
         TextBlock statNeeds, statRun, statUnread, needsLabel, updatedText;
         // 섹션마다 「읽은 것 n개 더 보기」 를 펼친 섹션 이름
         HashSet<string> openRead = new HashSet<string>();
@@ -436,7 +510,7 @@ namespace SessionWidget
       <StackPanel x:Name='Header' DockPanel.Dock='Top' Margin='14,8,8,4' Background='Transparent'>
         <DockPanel>
           <StackPanel DockPanel.Dock='Right' Orientation='Horizontal' VerticalAlignment='Center'>
-            <Button x:Name='BtnTheme' Style='{StaticResource Icon}' Content='&#xE790;' ToolTip='색 테마 · 크기'/>
+            <Button x:Name='BtnSettings' Style='{StaticResource Icon}' Content='&#xE713;'/>
             <Button x:Name='BtnBoardView' Style='{StaticResource Icon}' Content='&#xE890;'/>
             <Button x:Name='BtnSelect' Style='{StaticResource Icon}' Content='&#xE762;'/>
             <Border Width='1' Height='14' Background='{DynamicResource tLine}' Margin='3,0'/>
@@ -448,7 +522,7 @@ namespace SessionWidget
           <TextBlock x:Name='Account' Foreground='{DynamicResource tMuted}' FontSize='11' VerticalAlignment='Center' Margin='8,1,0,0'
                      TextTrimming='CharacterEllipsis' ToolTip='Claude 앱에 로그인한 계정 · 조직'/>
         </DockPanel>
-        <Grid Margin='0,8,6,0'>
+        <Grid x:Name='Tiles' Margin='0,8,6,0'>
           <Grid.ColumnDefinitions>
             <ColumnDefinition/><ColumnDefinition/><ColumnDefinition/>
           </Grid.ColumnDefinitions>
@@ -507,9 +581,16 @@ namespace SessionWidget
           </DockPanel>
         </Border>
       </StackPanel>
-      <ScrollViewer VerticalScrollBarVisibility='Auto' Margin='4,2,2,0'>
-        <StackPanel x:Name='List' Margin='0,0,0,6'/>
-      </ScrollViewer>
+      <Grid>
+        <ScrollViewer VerticalScrollBarVisibility='Auto' Margin='4,2,2,0'>
+          <StackPanel x:Name='List' Margin='0,0,0,6'/>
+        </ScrollViewer>
+        <Border x:Name='SettingsPanel' Visibility='Collapsed' Background='{DynamicResource tBg}'>
+          <ScrollViewer x:Name='SettingsScroll' VerticalScrollBarVisibility='Auto' Margin='4,2,2,0'>
+            <StackPanel x:Name='SettingsBody' Margin='10,4,12,14'/>
+          </ScrollViewer>
+        </Border>
+      </Grid>
     </DockPanel>
   </Border>
 </Window>";
@@ -620,8 +701,13 @@ namespace SessionWidget
 
             LoadSettings();
             ApplyThemeResources(Theme.Find(themeId));
-            btnTheme = (Button)Window.FindName("BtnTheme");
-            btnTheme.Click += (s, e) => ShowThemeMenu();
+            btnSettings = (Button)Window.FindName("BtnSettings");
+            settingsPanel = (FrameworkElement)Window.FindName("SettingsPanel");
+            settingsBody = (StackPanel)Window.FindName("SettingsBody");
+            settingsScroll = (ScrollViewer)Window.FindName("SettingsScroll");
+            tilesGrid = (FrameworkElement)Window.FindName("Tiles");
+            btnSettings.Click += (s, e) => ToggleSettings();
+            UpdateSettingsButton();
 
             header.MouseLeftButtonDown += (s, e) => { try { Window.DragMove(); } catch { } };
             btnHeld.Click += (s, e) => { showHeld = !showHeld; SaveSettings(); Render(); if (showHeld) ShowSection("held"); };
@@ -662,6 +748,7 @@ namespace SessionWidget
             UpdateGuide();
             Window.PreviewKeyDown += (s, e) =>
             {
+                if (e.Key == Key.Escape && showSettings) { ToggleSettings(); e.Handled = true; return; }
                 if (e.Key == Key.Escape && (selectMode || selected.Count > 0)) { EndSelect(); e.Handled = true; }
                 else if (e.Key == Key.A && Keyboard.Modifiers == ModifierKeys.Control) { SelectAllMain(); e.Handled = true; }
             };
@@ -723,6 +810,7 @@ namespace SessionWidget
                 SaveSettings();
             };
             menu.Items.Add(notifyItem);
+            menu.Opening += (s, e) => notifyItem.Checked = notifyEnd;
             var themeItem = new WinForms.ToolStripMenuItem("테마");
             foreach (var d in Theme.All)
             {
@@ -803,6 +891,7 @@ namespace SessionWidget
             knownIds = StrSet(Get(d, "knownIds"));
             collapsedGroups = StrSet(Get(d, "collapsedGroups"));
             openRead = StrSet(Get(d, "openReadGroups"));
+            Ui.Load(Get(d, "ui") as Dictionary<string, object>);
             if (Str(d, "theme") != "") themeId = Theme.Find(Str(d, "theme")).Id;
             if (d.ContainsKey("notifyEnd") && d["notifyEnd"] is bool) notifyEnd = (bool)d["notifyEnd"];
             if (d.ContainsKey("zoom")) { try { zoom = Math.Max(0.8, Math.Min(1.5, ToDouble(d["zoom"]))); } catch { } }
@@ -844,6 +933,7 @@ namespace SessionWidget
             d["theme"] = themeId;
             d["zoom"] = zoom;
             d["notifyEnd"] = notifyEnd;
+            d["ui"] = Ui.Save();
             WriteJson(settingsFile, d);
         }
 
@@ -1250,6 +1340,21 @@ namespace SessionWidget
             return (hr / 24) + "일";
         }
 
+        /// 줄 끝 시간: 설정(Ui.TimeMode · Ui.AbsFormat)대로 「7시간」 · 「26-11-18 18:10:50」 · 둘 다
+        static string TimeLabel(long ms)
+        {
+            if (ms <= 0) return "";
+            var t = ToLocal(ms);
+            var n = ToLocal(NowMs());
+            string fmt = Ui.AbsFormat == "full" ? "yy-MM-dd HH:mm:ss"
+                : Ui.AbsFormat == "short" ? "MM-dd HH:mm"
+                : (t.Date == n.Date ? "HH:mm" : "MM-dd HH:mm");
+            string abs = t.ToString(fmt, CultureInfo.InvariantCulture);
+            if (Ui.TimeMode == "abs") return abs;
+            if (Ui.TimeMode == "both") return AgoShort(ms) + " · " + abs;
+            return AgoShort(ms);
+        }
+
         /// 오늘이면 14:30, 아니면 11.19 09:00
         static string ClockShort(long ms)
         {
@@ -1309,6 +1414,12 @@ namespace SessionWidget
             needsLabel.Foreground = B(needs > 0 ? Theme.Get("NeedsHead") : CInkDim);
 
             accountLine.Text = accountText;
+            accountLine.Visibility = Ui.Account ? Visibility.Visible : Visibility.Collapsed;
+            tilesGrid.Visibility = Ui.Tiles ? Visibility.Visible : Visibility.Collapsed;
+            updatedText.Visibility = Ui.Updated ? Visibility.Visible : Visibility.Collapsed;
+            statNeeds.FontSize = Ui.Stat;
+            statRun.FontSize = Ui.Stat;
+            statUnread.FontSize = Ui.Stat;
             if (updatedAtMs == 0) ShowStatus(Config.MsgWaiting, Theme.Get("Running"));
             else if (panelError != "") ShowStatus(panelError, Theme.Get("Red"));
             else if (now - updatedAtMs > Config.StaleSeconds * 1000L) ShowStatus(string.Format(Config.MsgStale, AgoText(updatedAtMs)), Theme.Get("Running"));
@@ -1413,7 +1524,7 @@ namespace SessionWidget
         /// 「읽은 것 더 보기」 로 접어 둘 줄: 읽었고, 작업 중 · 강조 · 리마인드가 아니고, 지금 보거나 고른 것도 아님
         bool IsQuiet(Session s, Dictionary<string, object> m)
         {
-            return !s.IsRunning && !IsUnread(s, m) && !Bool(m, "star") && Long(m, "remindAt") == 0
+            return Ui.FoldRead && !s.IsRunning && !IsUnread(s, m) && !Bool(m, "star") && Long(m, "remindAt") == 0
                 && s.Id != viewFocused && !selected.Contains(s.Id);
         }
 
@@ -1424,7 +1535,7 @@ namespace SessionWidget
             var c = new TextBlock();
             c.Text = count.ToString();
             c.Foreground = B(CInkMuted);
-            c.FontSize = 11;
+            c.FontSize = Ui.Small;
             DockPanel.SetDock(c, Dock.Right);
             dp.Children.Add(c);
             if (folded.HasValue)
@@ -1437,7 +1548,7 @@ namespace SessionWidget
             var t = new TextBlock();
             t.Text = name;
             t.Foreground = B(color);
-            t.FontSize = 11;
+            t.FontSize = Ui.Section;
             t.FontWeight = FontWeights.SemiBold;
             t.TextTrimming = TextTrimming.CharacterEllipsis;
             dp.Children.Add(t);
@@ -1454,7 +1565,7 @@ namespace SessionWidget
             var t = new TextBlock();
             t.Text = text;
             t.Foreground = B(CInkMuted);
-            t.FontSize = 11;
+            t.FontSize = Ui.Small;
             var b = new Border();
             b.Child = t;
             b.Background = Brushes.Transparent;
@@ -1471,7 +1582,7 @@ namespace SessionWidget
             t.Text = text;
             t.TextWrapping = TextWrapping.Wrap;
             t.Foreground = B(CInkMuted);
-            t.FontSize = 11;
+            t.FontSize = Ui.Small;
             t.Margin = new Thickness(10, 0, 10, 4);
             return t;
         }
@@ -1529,14 +1640,14 @@ namespace SessionWidget
 
             // 오른쪽은 먼저 넣은 것이 맨 오른쪽
             var time = new TextBlock();
-            time.FontSize = 11;
+            time.FontSize = Ui.Small;
             time.Margin = new Thickness(8, 0, 0, 0);
             time.VerticalAlignment = VerticalAlignment.Center;
             if (s.IsRunning) { time.Text = "작업 중"; time.Foreground = B(Theme.Get("Running")); }
-            else { time.Text = AgoShort(IsoMs(s.LastActivityAt)); time.Foreground = B(CInkMuted); }
+            else { time.Text = TimeLabel(IsoMs(s.LastActivityAt)); time.Foreground = B(CInkMuted); }
             DockPanel.SetDock(time, Dock.Right);
             dp.Children.Add(time);
-            if (!s.Remote)
+            if (!s.Remote && Ui.RemoteOff)
             {
                 var r = RemoteOffIcon();
                 r.Margin = new Thickness(6, 0, 0, 0);
@@ -1576,6 +1687,7 @@ namespace SessionWidget
 
             var title = new TextBlock();
             title.Text = s.Title;
+            title.FontSize = Ui.Title;
             title.TextTrimming = TextTrimming.CharacterEllipsis;
             title.VerticalAlignment = VerticalAlignment.Center;
             bool strong = card || unread || s.IsRunning || star;
@@ -1662,10 +1774,10 @@ namespace SessionWidget
                 var ask = new TextBlock();
                 ask.Text = s.Ask;
                 ask.Foreground = B(Theme.Get("Ask"));
-                ask.FontSize = 11.5;
+                ask.FontSize = Ui.Ask;
                 ask.TextWrapping = TextWrapping.Wrap;
                 ask.TextTrimming = TextTrimming.CharacterEllipsis;
-                ask.MaxHeight = 50;
+                ask.MaxHeight = Ui.Ask * 4.4;
                 ask.Margin = new Thickness(0, 4, 0, 0);
                 stack.Children.Add(ask);
             }
@@ -1688,7 +1800,7 @@ namespace SessionWidget
             btns.Children.Add(CardButton("열기", true, () => DoAction("open", id)));
             btns.Children.Add(CardButton("미루기", false, () => DoAction("hold", id)));
             btns.Children.Add(CardButton("확인 끝", false, () => DoAction("done", id)));
-            stack.Children.Add(btns);
+            if (Ui.CardButtons) stack.Children.Add(btns);
             card.Child = stack;
             cardById[s.Id] = card;
             card.ContextMenu = BuildMenu(s, m, "main");
@@ -1706,7 +1818,7 @@ namespace SessionWidget
             sp.Children.Add(g);
             var t = new TextBlock();
             t.Text = text;
-            t.FontSize = 11;
+            t.FontSize = Ui.Small;
             t.Foreground = B(color);
             t.TextTrimming = TextTrimming.CharacterEllipsis;
             t.MaxWidth = 220;
@@ -1829,6 +1941,8 @@ namespace SessionWidget
             BuildGuide();
             UpdateGuide();
             Render();
+            UpdateSettingsButton();
+            if (showSettings) BuildSettings();
         }
 
         void SetTheme(string id)
@@ -1845,67 +1959,277 @@ namespace SessionWidget
             PreviewTheme(Theme.Find(themeId));
         }
 
-        /// 팔레트 버튼 메뉴: 테마(마우스를 올리면 미리 보기) · 크기
-        void ShowThemeMenu()
+        // ---------- 설정(톱니바퀴) ----------
+
+        void ToggleSettings()
         {
-            var menu = new ContextMenu();
-            var head = new MenuItem();
-            head.Header = "색 테마 — 마우스를 올리면 미리 보기";
-            head.IsEnabled = false;
-            menu.Items.Add(head);
-            bool chosen = false;
+            showSettings = !showSettings;
+            settingsPanel.Visibility = showSettings ? Visibility.Visible : Visibility.Collapsed;
+            UpdateSettingsButton();
+            if (showSettings) BuildSettings();
+        }
+
+        void UpdateSettingsButton()
+        {
+            btnSettings.Background = showSettings ? B(Theme.Get("IconOnBg")) : Brushes.Transparent;
+            btnSettings.Foreground = B(showSettings ? CInk : Theme.Get("Icon"));
+            btnSettings.ToolTip = showSettings ? "설정 닫기 (Esc)" : "설정 — 테마 · 글씨 크기 · 시간 표기 · 보이기 · 알림";
+        }
+
+        /// 설정을 바꾼 뒤: 저장 · 목록 다시 그림 · 설정 판도 다시
+        void SettingsChanged()
+        {
+            SaveSettings();
+            Render();
+            UpdateSettingsButton();
+            if (showSettings) BuildSettings();
+        }
+
+        void BuildSettings()
+        {
+            double keep = settingsScroll.VerticalOffset;
+            var body = settingsBody;
+            body.Children.Clear();
+
+            var top = new DockPanel();
+            top.Margin = new Thickness(0, 2, 0, 2);
+            var close = new Button();
+            close.Content = "닫기";
+            close.Click += (o, e) => ToggleSettings();
+            DockPanel.SetDock(close, Dock.Right);
+            top.Children.Add(close);
+            var h = new TextBlock();
+            h.Text = "설정";
+            h.FontSize = 14;
+            h.FontWeight = FontWeights.SemiBold;
+            h.Foreground = B(CInk);
+            h.VerticalAlignment = VerticalAlignment.Center;
+            top.Children.Add(h);
+            body.Children.Add(top);
+
+            // 색 테마
+            body.Children.Add(SetHead("색 테마"));
+            var themes = new WrapPanel();
             foreach (var d in Theme.All)
             {
                 var def = d;
-                var mi = new MenuItem();
+                bool cur = d.Id == themeId;
+                var chip = new Border();
+                chip.CornerRadius = new CornerRadius(6);
+                chip.BorderThickness = new Thickness(cur ? 1.5 : 1);
+                chip.BorderBrush = B(cur ? Theme.Get("Accent") : CLine);
+                chip.Background = B(CSurface);
+                chip.Padding = new Thickness(6, 4, 8, 4);
+                chip.Margin = new Thickness(0, 0, 6, 6);
+                chip.Cursor = Cursors.Hand;
                 var row = new StackPanel();
                 row.Orientation = Orientation.Horizontal;
-                var sw = new StackPanel();
-                sw.Orientation = Orientation.Horizontal;
-                foreach (var hex in new[] { d.Bg, d.Surface, d.Ink, d.Accent, d.Needs, d.Running })
+                foreach (var hex in new[] { d.Bg, d.Surface, d.Accent, d.Needs })
                 {
                     var r = new Border();
-                    r.Width = 9;
-                    r.Height = 14;
+                    r.Width = 7;
+                    r.Height = 12;
                     r.Background = B(hex);
-                    sw.Children.Add(r);
+                    row.Children.Add(r);
                 }
-                var frame = new Border();
-                frame.Child = sw;
-                frame.BorderBrush = B(Theme.Get("Line"));
-                frame.BorderThickness = new Thickness(1);
-                frame.Margin = new Thickness(0, 0, 10, 0);
-                frame.VerticalAlignment = VerticalAlignment.Center;
-                row.Children.Add(frame);
                 var name = new TextBlock();
                 name.Text = d.Name;
+                name.FontSize = 11;
+                name.Foreground = B(CInk);
+                name.Margin = new Thickness(6, 0, 0, 0);
                 name.VerticalAlignment = VerticalAlignment.Center;
                 row.Children.Add(name);
-                mi.Header = row;
-                mi.IsChecked = d.Id == themeId;
-                mi.MouseEnter += (o, e) => PreviewTheme(def);
-                mi.Click += (o, e) => { chosen = true; SetTheme(def.Id); };
-                menu.Items.Add(mi);
+                chip.Child = row;
+                if (!cur)
+                {
+                    chip.MouseEnter += (o, e) => chip.BorderBrush = B(Theme.Get("LineHover"));
+                    chip.MouseLeave += (o, e) => chip.BorderBrush = B(CLine);
+                }
+                chip.MouseLeftButtonUp += (o, e) =>
+                {
+                    themeId = def.Id;
+                    ApplyThemeResources(def);
+                    BuildGuide();
+                    UpdateGuide();
+                    SettingsChanged();
+                };
+                themes.Children.Add(chip);
             }
-            menu.Items.Add(new Separator());
-            var head2 = new MenuItem();
-            head2.Header = "크기";
-            head2.IsEnabled = false;
-            menu.Items.Add(head2);
-            foreach (var z in new[] { 0.9, 1.0, 1.1, 1.25 })
+            body.Children.Add(themes);
+            body.Children.Add(SetBlock("전체 크기 (아이콘 · 여백까지 같이)", Segment(
+                new[] { "90%", "100%", "110%", "125%" }, new[] { "0.9", "1", "1.1", "1.25" },
+                zoom.ToString("0.##", CultureInfo.InvariantCulture),
+                v => { zoom = double.Parse(v, CultureInfo.InvariantCulture); ApplyThemeResources(Theme.Find(themeId)); })));
+
+            // 글씨 크기
+            body.Children.Add(SetHead("글씨 크기"));
+            body.Children.Add(SetRow("세션 제목", Stepper(Ui.Title, 10, 18, 0.5, v => Ui.Title = v)));
+            body.Children.Add(SetRow("확인 필요 질문", Stepper(Ui.Ask, 10, 16, 0.5, v => Ui.Ask = v)));
+            body.Children.Add(SetRow("시간 · 개수 · 안내 글", Stepper(Ui.Small, 9.5, 15, 0.5, v => Ui.Small = v)));
+            body.Children.Add(SetRow("섹션 이름", Stepper(Ui.Section, 9.5, 15, 0.5, v => Ui.Section = v)));
+            body.Children.Add(SetRow("숫자 타일", Stepper(Ui.Stat, 14, 28, 1, v => Ui.Stat = v)));
+
+            // 시간 표기
+            body.Children.Add(SetHead("시간 표기"));
+            body.Children.Add(SetBlock("줄 끝 시간", Segment(
+                new[] { "7시간", "시각", "둘 다" }, new[] { "ago", "abs", "both" }, Ui.TimeMode, v => Ui.TimeMode = v)));
+            body.Children.Add(SetBlock("시각 모양", Segment(
+                new[] { "26-11-18 18:10:50", "11-18 18:10", "오늘이면 18:10" }, new[] { "full", "short", "smart" },
+                Ui.AbsFormat, v => Ui.AbsFormat = v)));
+            long now = NowMs();
+            var ex = new TextBlock();
+            ex.Text = "예: 방금 끝난 세션 → " + TimeLabel(now - 60000) + "   ·   어제 끝난 세션 → " + TimeLabel(now - 26 * 3600000L);
+            ex.FontSize = 11;
+            ex.Foreground = B(CInkMuted);
+            ex.TextWrapping = TextWrapping.Wrap;
+            ex.Margin = new Thickness(0, 2, 0, 0);
+            body.Children.Add(ex);
+
+            // 보이기
+            body.Children.Add(SetHead("보이기"));
+            body.Children.Add(SetRow("숫자 타일 (확인 필요 · 작업 중 · 안 읽음)", Toggle(Ui.Tiles, v => Ui.Tiles = v)));
+            body.Children.Add(SetRow("계정 · 조직", Toggle(Ui.Account, v => Ui.Account = v)));
+            body.Children.Add(SetRow("원격 제어 꺼짐 아이콘", Toggle(Ui.RemoteOff, v => Ui.RemoteOff = v)));
+            body.Children.Add(SetRow("확인 필요 카드의 열기 · 미루기 · 확인 끝 버튼", Toggle(Ui.CardButtons, v => Ui.CardButtons = v)));
+            body.Children.Add(SetRow("읽은 세션은 「더 보기」 로 접어 두기", Toggle(Ui.FoldRead, v => Ui.FoldRead = v)));
+            body.Children.Add(SetRow("맨 아래 갱신 시각", Toggle(Ui.Updated, v => Ui.Updated = v)));
+
+            // 알림
+            body.Children.Add(SetHead("알림"));
+            body.Children.Add(SetRow("세션이 끝나면 위젯도 알림 (Claude 앱 알림과 겹침)", Toggle(notifyEnd, v => notifyEnd = v)));
+            var remind = new TextBlock();
+            remind.Text = "리마인드 알림은 늘 울립니다.";
+            remind.FontSize = 11;
+            remind.Foreground = B(CInkMuted);
+            body.Children.Add(remind);
+
+            var reset = new Button();
+            reset.Content = "글씨 · 시간 · 보이기 · 크기를 기본값으로";
+            reset.HorizontalAlignment = HorizontalAlignment.Left;
+            reset.Margin = new Thickness(0, 16, 0, 0);
+            reset.Click += (o, e) =>
             {
-                double zz = z;
-                var mi = new MenuItem();
-                mi.Header = (int)Math.Round(z * 100) + "%" + (z == 1.0 ? " (기본)" : "");
-                mi.IsChecked = Math.Abs(zoom - z) < 0.01;
-                mi.Click += (o, e) => { chosen = true; SetZoom(zz); };
-                menu.Items.Add(mi);
+                Ui.Reset();
+                zoom = 1.0;
+                ApplyThemeResources(Theme.Find(themeId));
+                SettingsChanged();
+            };
+            body.Children.Add(reset);
+
+            Window.Dispatcher.BeginInvoke(new Action(() => settingsScroll.ScrollToVerticalOffset(keep)), DispatcherPriority.Loaded);
+        }
+
+        TextBlock SetHead(string text)
+        {
+            var t = new TextBlock();
+            t.Text = text;
+            t.FontSize = 11;
+            t.FontWeight = FontWeights.SemiBold;
+            t.Foreground = B(CInkDim);
+            t.Margin = new Thickness(0, 14, 0, 6);
+            return t;
+        }
+
+        /// 이름 왼쪽 · 조절 오른쪽 한 줄
+        FrameworkElement SetRow(string label, FrameworkElement control)
+        {
+            var dp = new DockPanel();
+            dp.Margin = new Thickness(0, 3, 0, 3);
+            DockPanel.SetDock(control, Dock.Right);
+            control.Margin = new Thickness(10, 0, 0, 0);
+            dp.Children.Add(control);
+            var t = new TextBlock();
+            t.Text = label;
+            t.Foreground = B(CInk);
+            t.TextWrapping = TextWrapping.Wrap;
+            t.VerticalAlignment = VerticalAlignment.Center;
+            dp.Children.Add(t);
+            return dp;
+        }
+
+        /// 이름 위 · 조절 아래(고를 것이 넓을 때)
+        FrameworkElement SetBlock(string label, FrameworkElement control)
+        {
+            var sp = new StackPanel();
+            sp.Margin = new Thickness(0, 4, 0, 2);
+            var t = new TextBlock();
+            t.Text = label;
+            t.Foreground = B(CInk);
+            t.Margin = new Thickness(0, 0, 0, 4);
+            sp.Children.Add(t);
+            sp.Children.Add(control);
+            return sp;
+        }
+
+        /// 여럿 중 하나 고르기
+        FrameworkElement Segment(string[] labels, string[] values, string cur, Action<string> set)
+        {
+            var wp = new WrapPanel();
+            for (int i = 0; i < labels.Length; i++)
+            {
+                string v = values[i];
+                var b = new Button();
+                b.Content = labels[i];
+                b.Margin = new Thickness(0, 0, 5, 5);
+                if (v == cur)
+                {
+                    b.Background = B(Theme.Get("PickBg"));
+                    b.BorderBrush = B(Theme.Get("Accent"));
+                    b.Foreground = B(CInk);
+                }
+                b.Click += (o, e) => { set(v); SettingsChanged(); };
+                wp.Children.Add(b);
             }
-            // 고르지 않고 닫으면 원래 테마로
-            menu.Closed += (o, e) => { if (!chosen) PreviewTheme(Theme.Find(themeId)); };
-            menu.PlacementTarget = btnTheme;
-            menu.Placement = PlacementMode.Bottom;
-            menu.IsOpen = true;
+            return wp;
+        }
+
+        /// − 값 + (글씨 크기)
+        FrameworkElement Stepper(double v, double min, double max, double step, Action<double> set)
+        {
+            var sp = new StackPanel();
+            sp.Orientation = Orientation.Horizontal;
+            var minus = new Button();
+            minus.Content = "−";
+            minus.Padding = new Thickness(9, 0, 9, 1);
+            minus.IsEnabled = v > min;
+            minus.Click += (o, e) => { set(Math.Max(min, v - step)); SettingsChanged(); };
+            var val = new TextBlock();
+            val.Text = v.ToString("0.#", CultureInfo.InvariantCulture);
+            val.Width = 36;
+            val.TextAlignment = TextAlignment.Center;
+            val.VerticalAlignment = VerticalAlignment.Center;
+            val.Foreground = B(CInk);
+            var plus = new Button();
+            plus.Content = "+";
+            plus.Padding = new Thickness(9, 0, 9, 1);
+            plus.IsEnabled = v < max;
+            plus.Click += (o, e) => { set(Math.Min(max, v + step)); SettingsChanged(); };
+            sp.Children.Add(minus);
+            sp.Children.Add(val);
+            sp.Children.Add(plus);
+            return sp;
+        }
+
+        /// 켜기 · 끄기 스위치
+        FrameworkElement Toggle(bool on, Action<bool> set)
+        {
+            var track = new Border();
+            track.Width = 32;
+            track.Height = 18;
+            track.CornerRadius = new CornerRadius(9);
+            track.Background = B(on ? Theme.Get("Accent") : Theme.Get("Faint"));
+            track.Cursor = Cursors.Hand;
+            track.VerticalAlignment = VerticalAlignment.Center;
+            var knob = new System.Windows.Shapes.Ellipse();
+            knob.Width = 12;
+            knob.Height = 12;
+            knob.Fill = B(on ? Theme.Get("Bg") : CInk);
+            knob.HorizontalAlignment = on ? HorizontalAlignment.Right : HorizontalAlignment.Left;
+            knob.VerticalAlignment = VerticalAlignment.Center;
+            knob.Margin = new Thickness(3, 0, 3, 0);
+            track.Child = knob;
+            track.MouseLeftButtonUp += (o, e) => { set(!on); SettingsChanged(); };
+            return track;
         }
 
         // ---------- 고정 ----------
@@ -1929,7 +2253,7 @@ namespace SessionWidget
                 { "Shift + 클릭", "지난번 고른 것부터 여기까지 전부 고르기" },
                 { "Ctrl + A / Esc", "목록 전부 고르기 / 고르기 끝" },
                 { "고정 버튼", "누를 때마다 고정 → 중간 → 고정 해제" },
-                { "팔레트 버튼", "색 테마 · 크기 고르기(마우스를 올리면 미리 보기)" },
+                { "톱니바퀴 버튼", "설정 — 테마 · 크기 · 글씨 크기 · 시간 표기 · 보이기 · 알림 (Esc 로 닫기)" },
                 { "최소화 버튼", "작업 표시줄로 내리기(고정 중에는 꺼짐)" },
                 { "트레이 아이콘", "더블클릭으로 다시 띄우기 · 오른쪽 클릭 메뉴" },
             };
@@ -2124,7 +2448,7 @@ namespace SessionWidget
             var t = new TextBlock();
             t.Text = text;
             t.Foreground = B(color);
-            t.FontSize = 11;
+            t.FontSize = Ui.Small;
             t.TextWrapping = TextWrapping.Wrap;
             if (bold) t.FontWeight = FontWeights.Bold;
             return t;

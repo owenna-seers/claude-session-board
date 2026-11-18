@@ -12,7 +12,8 @@
 3. 파일을 다시 읽는 주기 → `PollSeconds` · 「갱신 없음」 판정 → `StaleSeconds`
 4. 시간대 → `TzOffsetHours` (null = PC 시간대, 9 = 한국) · 시각 양식 → `ClockFormat` · `TimeFormat`
 5. 「내일 n시」 → `TomorrowHour`
-6. 색 → `static class Theme` 의 `All`(테마 묶음마다 바탕색 12개). 마우스 · 고른 것 · 버튼 · 타일 같은 나머지 색은 `Theme.Build` 가 섞어서 만든다. 새 테마는 `All` 에 한 줄 더하면 팔레트 메뉴와 트레이 메뉴 「테마」에 저절로 나온다. 처음 켰을 때 테마 → `Config.DefaultTheme`
+6. 색 → `static class Theme` 의 `All`(테마 묶음마다 바탕색 12개). 마우스 · 고른 것 · 버튼 · 타일 같은 나머지 색은 `Theme.Build` 가 섞어서 만든다. 새 테마는 `All` 에 한 줄 더하면 설정 판과 트레이 메뉴 「테마」에 저절로 나온다. 처음 켰을 때 테마 → `Config.DefaultTheme`
+   - 글씨 크기 · 시간 표기 · 보이기의 처음 값 · 범위 → `static class Ui`(`Reset` · `Load`). 설정 판의 줄 → `BuildSettings`(`SetRow` · `SetBlock` · `Stepper` · `Segment` · `Toggle`). 줄 끝 시간 글 → `TimeLabel`
 7. 머리줄 문구 → `MsgWaiting` · `MsgStale`
 8. 창 · 버튼 · 메뉴 · 툴팁 모양 · 글꼴 · 기본 크기 → `const string Xaml`(창 안) · `const string PopupXaml`(오른쪽 클릭 메뉴 · 툴팁). 색은 `{DynamicResource tInk}` 처럼 테마 이름에 `t` 를 붙여 쓴다
 9. 확인 필요 카드 → `MakeNeedsCard`, 한 줄 목록 → `MakeRow`, 제목 줄 아이콘 → `TitleLine`, 오른쪽 클릭 메뉴 → `BuildMenu` 의 `AddItem(...)`(끝 인자는 Segoe Fluent Icons 글자)
