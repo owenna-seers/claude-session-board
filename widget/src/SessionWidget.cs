@@ -31,8 +31,8 @@ using WinForms = System.Windows.Forms;
 [assembly: AssemblyProduct("세션 위젯")]
 [assembly: AssemblyDescription("Claude 세션 현황 위젯")]
 [assembly: AssemblyCompany("session-board")]
-[assembly: AssemblyVersion("1.2.0.0")]
-[assembly: AssemblyFileVersion("1.2.0.0")]
+[assembly: AssemblyVersion("1.3.0.0")]
+[assembly: AssemblyFileVersion("1.3.0.0")]
 
 namespace SessionWidget
 {
@@ -68,8 +68,8 @@ namespace SessionWidget
         public const string ColorRemoteOn = "#7EE2A8";
         public const string ColorWarn = "#FFB86B";
         public const string ColorError = "#FF7B7B";
-        /// 앱 창에서 지금 보고 있는 세션의 테두리 · 「보는 중」 글
-        public const string ColorViewing = "#7FE3FF";
+        /// 앱 창에서 지금 보고 있는 세션: 줄 왼쪽 가는 선 · 카드 테두리
+        public const string ColorViewing = "#7FB8FF";
 
         // 머리줄 문구
         public const string MsgWaiting = "현황 기다리는 중 — 플러그인을 설치한 뒤 Claude 앱에서 새 세션을 하나 열면 채워집니다";
@@ -127,7 +127,11 @@ namespace SessionWidget
 
         public Window Window;
         FrameworkElement header;
-        TextBlock summary;
+        // 머리의 숫자 타일 셋 · 맨 아래 갱신 시각
+        Border tileNeeds;
+        TextBlock statNeeds, statRun, statUnread, needsLabel, updatedText;
+        // 섹션마다 「읽은 것 n개 더 보기」 를 펼친 섹션 이름
+        HashSet<string> openRead = new HashSet<string>();
         TextBlock subLine;
         TextBlock accountLine;
         string accountText = "";
@@ -189,115 +193,220 @@ namespace SessionWidget
         const string Xaml = @"
 <Window xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'
         xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml'
-        Title='{TITLE}' Width='340' Height='520' MinWidth='240' MinHeight='160'
+        Title='{TITLE}' Width='340' Height='520' MinWidth='260' MinHeight='200'
         WindowStyle='None' AllowsTransparency='True' Background='Transparent'
         Topmost='True' ResizeMode='CanResizeWithGrip' ShowInTaskbar='True'
-        FontFamily='Malgun Gothic' FontSize='12'>
+        FontFamily='Segoe UI, Malgun Gothic' FontSize='12' Foreground='#E8E8EA'
+        TextOptions.TextFormattingMode='Display'>
   <Window.Resources>
+    <FontFamily x:Key='Icons'>Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
     <Style TargetType='Button'>
-      <Setter Property='Foreground' Value='#DDFFFFFF'/>
+      <Setter Property='Foreground' Value='#C8CAD1'/>
+      <Setter Property='Background' Value='Transparent'/>
+      <Setter Property='BorderBrush' Value='#3A3C44'/>
+      <Setter Property='FontSize' Value='11.5'/>
+      <Setter Property='Padding' Value='10,3'/>
       <Setter Property='Cursor' Value='Hand'/>
       <Setter Property='Template'>
         <Setter.Value>
           <ControlTemplate TargetType='Button'>
-            <Border x:Name='b' Background='#22FFFFFF' CornerRadius='4' Padding='7,2' Margin='2,0,0,0'>
+            <Border x:Name='b' Background='{TemplateBinding Background}' BorderBrush='{TemplateBinding BorderBrush}'
+                    BorderThickness='1' CornerRadius='6' Padding='{TemplateBinding Padding}'>
               <ContentPresenter HorizontalAlignment='Center' VerticalAlignment='Center'/>
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property='IsMouseOver' Value='True'>
-                <Setter TargetName='b' Property='Background' Value='#55FFFFFF'/>
+                <Setter TargetName='b' Property='Background' Value='#2A2C33'/>
+                <Setter TargetName='b' Property='BorderBrush' Value='#4A4C55'/>
+              </Trigger>
+              <Trigger Property='IsEnabled' Value='False'>
+                <Setter TargetName='b' Property='Opacity' Value='0.4'/>
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
       </Setter>
     </Style>
+    <Style x:Key='Primary' TargetType='Button'>
+      <Setter Property='Foreground' Value='#17181C'/>
+      <Setter Property='FontSize' Value='11.5'/>
+      <Setter Property='Cursor' Value='Hand'/>
+      <Setter Property='Template'>
+        <Setter.Value>
+          <ControlTemplate TargetType='Button'>
+            <Border x:Name='b' Background='#E8E8EA' CornerRadius='6' Padding='11,4'>
+              <ContentPresenter HorizontalAlignment='Center' VerticalAlignment='Center'/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property='IsMouseOver' Value='True'>
+                <Setter TargetName='b' Property='Background' Value='#FFFFFF'/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key='Icon' TargetType='Button'>
+      <Setter Property='Foreground' Value='#8B8D96'/>
+      <Setter Property='Background' Value='Transparent'/>
+      <Setter Property='FontFamily' Value='{StaticResource Icons}'/>
+      <Setter Property='FontSize' Value='13'/>
+      <Setter Property='Cursor' Value='Hand'/>
+      <Setter Property='Template'>
+        <Setter.Value>
+          <ControlTemplate TargetType='Button'>
+            <Border x:Name='b' Width='26' Height='26' Background='{TemplateBinding Background}' CornerRadius='6'>
+              <ContentPresenter HorizontalAlignment='Center' VerticalAlignment='Center'/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property='IsMouseOver' Value='True'>
+                <Setter TargetName='b' Property='Background' Value='#2A2C33'/>
+              </Trigger>
+              <Trigger Property='IsEnabled' Value='False'>
+                <Setter TargetName='b' Property='Opacity' Value='0.35'/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+      <Style.Triggers>
+        <Trigger Property='IsMouseOver' Value='True'>
+          <Setter Property='Foreground' Value='#E8E8EA'/>
+        </Trigger>
+      </Style.Triggers>
+    </Style>
+    <Style x:Key='Link' TargetType='Button'>
+      <Setter Property='Foreground' Value='#7A7C85'/>
+      <Setter Property='FontSize' Value='11'/>
+      <Setter Property='Cursor' Value='Hand'/>
+      <Setter Property='Template'>
+        <Setter.Value>
+          <ControlTemplate TargetType='Button'>
+            <Border Background='Transparent' Padding='4,3'>
+              <ContentPresenter VerticalAlignment='Center'/>
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+      <Style.Triggers>
+        <Trigger Property='IsMouseOver' Value='True'>
+          <Setter Property='Foreground' Value='#D0D2D8'/>
+        </Trigger>
+      </Style.Triggers>
+    </Style>
+    <Style TargetType='ToolTip'>
+      <Setter Property='Background' Value='#25272E'/>
+      <Setter Property='Foreground' Value='#E8E8EA'/>
+      <Setter Property='BorderBrush' Value='#3A3C44'/>
+      <Setter Property='Padding' Value='8,5'/>
+      <Setter Property='FontFamily' Value='Segoe UI, Malgun Gothic'/>
+      <Setter Property='FontSize' Value='11.5'/>
+    </Style>
+    <Style TargetType='ScrollBar'>
+      <Setter Property='Width' Value='8'/>
+      <Setter Property='MinWidth' Value='8'/>
+      <Setter Property='Template'>
+        <Setter.Value>
+          <ControlTemplate TargetType='ScrollBar'>
+            <Track x:Name='PART_Track' IsDirectionReversed='True'>
+              <Track.DecreaseRepeatButton>
+                <RepeatButton Command='ScrollBar.PageUpCommand' Opacity='0' Focusable='False'/>
+              </Track.DecreaseRepeatButton>
+              <Track.IncreaseRepeatButton>
+                <RepeatButton Command='ScrollBar.PageDownCommand' Opacity='0' Focusable='False'/>
+              </Track.IncreaseRepeatButton>
+              <Track.Thumb>
+                <Thumb>
+                  <Thumb.Template>
+                    <ControlTemplate TargetType='Thumb'>
+                      <Border CornerRadius='3' Background='#3A3C44' Margin='2,0'/>
+                    </ControlTemplate>
+                  </Thumb.Template>
+                </Thumb>
+              </Track.Thumb>
+            </Track>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
   </Window.Resources>
-  <Border CornerRadius='10' Background='#EE1E1F24' BorderBrush='#40FFFFFF' BorderThickness='1'>
+  <Border CornerRadius='12' Background='#F717181C' BorderBrush='#2C2E35' BorderThickness='1'>
     <DockPanel>
-      <Grid x:Name='Header' DockPanel.Dock='Top' Margin='10,8,8,6' Background='Transparent'>
-        <StackPanel>
-          <DockPanel Margin='0,0,0,4'>
-            <StackPanel DockPanel.Dock='Right' Orientation='Horizontal' VerticalAlignment='Top' Margin='6,-2,0,0'>
-              <Button x:Name='BtnPin'/>
-              <Button x:Name='BtnMin' Content='—' ToolTip='트레이로 숨기기'/>
-              <Button x:Name='BtnClose' Content='✕' ToolTip='끄기'/>
+      <StackPanel x:Name='Header' DockPanel.Dock='Top' Margin='14,8,8,4' Background='Transparent'>
+        <DockPanel>
+          <StackPanel DockPanel.Dock='Right' Orientation='Horizontal' VerticalAlignment='Center'>
+            <Button x:Name='BtnBoardView' Style='{StaticResource Icon}' Content='&#xE890;'/>
+            <Button x:Name='BtnSelect' Style='{StaticResource Icon}' Content='&#xE762;'/>
+            <Border Width='1' Height='14' Background='#2E3038' Margin='3,0'/>
+            <Button x:Name='BtnPin' Style='{StaticResource Icon}'/>
+            <Button x:Name='BtnMin' Style='{StaticResource Icon}' Content='&#xE921;' FontSize='10'/>
+            <Button x:Name='BtnClose' Style='{StaticResource Icon}' Content='&#xE8BB;' FontSize='10' ToolTip='끄기'/>
+          </StackPanel>
+          <TextBlock Text='세션' FontSize='14' FontWeight='SemiBold' VerticalAlignment='Center'/>
+          <TextBlock x:Name='Account' Foreground='#6E7079' FontSize='11' VerticalAlignment='Center' Margin='8,1,0,0'
+                     TextTrimming='CharacterEllipsis' ToolTip='Claude 앱에 로그인한 계정 · 조직'/>
+        </DockPanel>
+        <Grid Margin='0,8,6,0'>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition/><ColumnDefinition/><ColumnDefinition/>
+          </Grid.ColumnDefinitions>
+          <Border x:Name='TileNeeds' Grid.Column='0' CornerRadius='8' Background='#202228' Padding='10,5,8,7' Margin='0,0,6,0'>
+            <StackPanel>
+              <TextBlock x:Name='StatNeeds' Text='0' FontSize='19' FontWeight='SemiBold'/>
+              <TextBlock x:Name='NeedsLabel' Text='확인 필요' FontSize='11' Foreground='#8B8D96'/>
             </StackPanel>
-            <TextBlock DockPanel.Dock='Left' Text='{TITLE}' Foreground='#66FFFFFF' FontSize='10.5' VerticalAlignment='Center'/>
-            <TextBlock x:Name='Account' Foreground='#88FFFFFF' FontSize='10.5' VerticalAlignment='Center'
-                       HorizontalAlignment='Right' TextTrimming='CharacterEllipsis' Margin='8,0,0,0'
-                       ToolTip='Claude 앱에 로그인한 계정 · 조직'/>
-          </DockPanel>
-          <TextBlock x:Name='Summary' Foreground='White' FontWeight='Bold' FontSize='13' TextWrapping='Wrap'/>
-          <TextBlock x:Name='SubLine' Foreground='#99FFFFFF' FontSize='11' TextWrapping='Wrap'/>
-          <Border Margin='-2,6,0,0' BorderBrush='#26FFFFFF' BorderThickness='0,1,0,0' Padding='0,5,0,0'>
-            <Button x:Name='BtnBoardView' HorizontalAlignment='Left'/>
           </Border>
-          <Border Margin='-2,5,0,0' BorderBrush='#26FFFFFF' BorderThickness='0,1,0,0' Padding='0,5,0,0'>
-            <Button x:Name='BtnSelect' HorizontalAlignment='Left' ToolTip='켜면 카드를 누를 때마다 골라짐 · 꺼져 있어도 Ctrl 클릭 · Shift 클릭으로 고를 수 있음 · Esc 로 풀기'/>
+          <Border Grid.Column='1' CornerRadius='8' Background='#202228' Padding='10,5,8,7' Margin='0,0,6,0'>
+            <StackPanel>
+              <TextBlock x:Name='StatRun' Text='0' FontSize='19' FontWeight='SemiBold'/>
+              <TextBlock Text='작업 중' FontSize='11' Foreground='#8B8D96'/>
+            </StackPanel>
           </Border>
-        </StackPanel>
-      </Grid>
-      <!-- 맨 아래: 「가이드 보기」 를 누르면 쓰는 법이 한 줄에 하나씩 펼쳐짐 -->
-      <StackPanel DockPanel.Dock='Bottom' Margin='8,2,8,6'>
-        <Border x:Name='GuidePanel' Visibility='Collapsed' Margin='0,4,0,4' Padding='8,6,8,6' CornerRadius='6' Background='#14FFFFFF'>
-          <Grid TextBlock.FontSize='11'>
-            <Grid.ColumnDefinitions>
-              <ColumnDefinition Width='Auto'/>
-              <ColumnDefinition Width='*'/>
-            </Grid.ColumnDefinitions>
-            <Grid.RowDefinitions>
-              <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
-              <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
-            </Grid.RowDefinitions>
-            <TextBlock Grid.Row='0' Grid.Column='0' Foreground='#DDFFFFFF' FontWeight='Bold' Margin='0,1,10,1' Text='카드 클릭'/>
-            <TextBlock Grid.Row='0' Grid.Column='1' Foreground='#AAFFFFFF' Margin='0,1' TextWrapping='Wrap' Text='앱에서 그 세션 열기 + 읽음 표시'/>
-            <TextBlock Grid.Row='1' Grid.Column='0' Foreground='#DDFFFFFF' FontWeight='Bold' Margin='0,1,10,1' Text='카드 오른쪽 클릭'/>
-            <TextBlock Grid.Row='1' Grid.Column='1' Foreground='#AAFFFFFF' Margin='0,1' TextWrapping='Wrap' Text='강조 · 미루기 · 확인 끝 · 위젯에서 빼기 · 알람 · 메모'/>
-            <TextBlock Grid.Row='2' Grid.Column='0' Foreground='#DDFFFFFF' FontWeight='Bold' Margin='0,1,10,1' Text='섹션 줄 클릭'/>
-            <TextBlock Grid.Row='2' Grid.Column='1' Foreground='#AAFFFFFF' Margin='0,1' TextWrapping='Wrap' Text='그 섹션 접기 · 펼치기'/>
-            <TextBlock Grid.Row='3' Grid.Column='0' Foreground='#DDFFFFFF' FontWeight='Bold' Margin='0,1,10,1' Text='Ctrl + 클릭'/>
-            <TextBlock Grid.Row='3' Grid.Column='1' Foreground='#AAFFFFFF' Margin='0,1' TextWrapping='Wrap' Text='카드 하나씩 고르기 · 풀기'/>
-            <TextBlock Grid.Row='4' Grid.Column='0' Foreground='#DDFFFFFF' FontWeight='Bold' Margin='0,1,10,1' Text='Shift + 클릭'/>
-            <TextBlock Grid.Row='4' Grid.Column='1' Foreground='#AAFFFFFF' Margin='0,1' TextWrapping='Wrap' Text='지난번 고른 카드부터 여기까지 전부 고르기'/>
-            <TextBlock Grid.Row='5' Grid.Column='0' Foreground='#DDFFFFFF' FontWeight='Bold' Margin='0,1,10,1' Text='Ctrl + A / Esc'/>
-            <TextBlock Grid.Row='6' Grid.Column='0' Foreground='#DDFFFFFF' FontWeight='Bold' Margin='0,1,10,1' Text='📌 버튼'/>
-            <TextBlock Grid.Row='5' Grid.Column='1' Foreground='#AAFFFFFF' Margin='0,1' TextWrapping='Wrap' Text='목록 전부 고르기 / 고르기 끝'/>
-            <TextBlock Grid.Row='6' Grid.Column='1' Foreground='#AAFFFFFF' Margin='0,1' TextWrapping='Wrap' Text='누를 때마다 📌 고정 → ↓📌 중간 → 고정 해제'/>
-            <TextBlock Grid.Row='7' Grid.Column='0' Foreground='#DDFFFFFF' FontWeight='Bold' Margin='0,1,10,1' Text='— 버튼'/>
-            <TextBlock Grid.Row='7' Grid.Column='1' Foreground='#AAFFFFFF' Margin='0,1' TextWrapping='Wrap' Text='작업 표시줄로 내리기(📌 고정 중에는 꺼짐)'/>
-            <TextBlock Grid.Row='8' Grid.Column='0' Foreground='#DDFFFFFF' FontWeight='Bold' Margin='0,1,10,1' Text='트레이 아이콘'/>
-            <TextBlock Grid.Row='8' Grid.Column='1' Foreground='#AAFFFFFF' Margin='0,1' TextWrapping='Wrap' Text='더블클릭으로 다시 띄우기 · 오른쪽 클릭 메뉴'/>
-          </Grid>
-        </Border>
-        <Button x:Name='BtnGuide' HorizontalAlignment='Left' ToolTip='위젯 쓰는 법 보기 · 감추기'/>
+          <Border Grid.Column='2' CornerRadius='8' Background='#202228' Padding='10,5,8,7'>
+            <StackPanel>
+              <TextBlock x:Name='StatUnread' Text='0' FontSize='19' FontWeight='SemiBold'/>
+              <TextBlock Text='안 읽음' FontSize='11' Foreground='#8B8D96'/>
+            </StackPanel>
+          </Border>
+        </Grid>
+        <TextBlock x:Name='SubLine' FontSize='11' TextWrapping='Wrap' Margin='0,6,6,0' Visibility='Collapsed'/>
       </StackPanel>
-      <Border x:Name='SelBar' DockPanel.Dock='Bottom' Margin='6,4,6,2' Padding='8,6,6,6' CornerRadius='6'
-              Background='#33508CFF' BorderBrush='#808FB8FF' BorderThickness='1' Visibility='Collapsed'>
-        <StackPanel>
-          <TextBlock x:Name='SelCount' Foreground='White' FontWeight='Bold' TextWrapping='Wrap' Margin='0,0,0,5'/>
-          <WrapPanel>
-            <Button x:Name='SelDone' Content='✓ 확인 끝' Margin='0,0,4,4'/>
-            <Button x:Name='SelHold' Content='⏸ 미루기' Margin='0,0,4,4'/>
-            <Button x:Name='SelUp' Content='⬆ 목록으로' ToolTip='위젯에 올리고, 미루기 · 확인 끝을 풀어 목록으로 되돌림' Margin='0,0,4,4'/>
-            <Button x:Name='SelOff' Content='－ 위젯에서 빼기' ToolTip='「위젯에 없는 것」 칸으로' Margin='0,0,4,4'/>
-            <Button x:Name='SelRead' Content='읽음으로' Margin='0,0,4,4'/>
-            <Button x:Name='SelStar' Content='★ 강조' Margin='0,0,4,4'/>
-            <Button x:Name='SelAll' Content='목록 전부 고르기' ToolTip='Ctrl+A' Margin='0,0,4,4'/>
-            <Button x:Name='SelClear' Content='고르기 끝' ToolTip='Esc' Margin='0,0,4,4'/>
-          </WrapPanel>
-        </StackPanel>
-      </Border>
-      <!-- 맨 아래 칸 탭: 누르면 목록 맨 아래에 그 칸이 펼쳐지고 그리로 스크롤 -->
-      <Border x:Name='FoldRow' DockPanel.Dock='Bottom' Margin='8,4,8,0' BorderBrush='#26FFFFFF' BorderThickness='0,1,0,0' Padding='0,5,0,0'>
-        <WrapPanel>
-          <Button x:Name='BtnDone' Margin='0,0,4,0' ToolTip='✓ 확인 끝: 새 대화가 시작되거나 새 답이 오면 다시 올라옴 · 펼치기 / 접기'/>
-          <Button x:Name='BtnHeld' Margin='0,0,4,0' ToolTip='⏸ 미룬 것(일단 보류): 「미루기 풀기」 할 때까지 접혀 있음 · 펼치기 / 접기'/>
-          <Button x:Name='BtnOff' Margin='0,0,4,0' ToolTip='위젯에 올리지 않은 세션: 오른쪽 클릭 「위젯에 올리기」 · 펼치기 / 접기'/>
-        </WrapPanel>
-      </Border>
-      <ScrollViewer VerticalScrollBarVisibility='Auto' Margin='6,0,4,0'>
-        <StackPanel x:Name='List'/>
+      <StackPanel DockPanel.Dock='Bottom'>
+        <Border x:Name='SelBar' Margin='8,4,8,2' Padding='10,7,8,4' CornerRadius='8'
+                Background='#1F2A3D' BorderBrush='#3D5A8A' BorderThickness='1' Visibility='Collapsed'>
+          <StackPanel>
+            <TextBlock x:Name='SelCount' FontWeight='SemiBold' TextWrapping='Wrap' Margin='0,0,0,6'/>
+            <WrapPanel>
+              <Button x:Name='SelDone' Content='확인 끝' Margin='0,0,5,5'/>
+              <Button x:Name='SelHold' Content='미루기' Margin='0,0,5,5'/>
+              <Button x:Name='SelUp' Content='목록으로' ToolTip='위젯에 올리고, 미루기 · 확인 끝을 풀어 목록으로 되돌림' Margin='0,0,5,5'/>
+              <Button x:Name='SelOff' Content='위젯에서 빼기' ToolTip='「안 올린 것」 칸으로' Margin='0,0,5,5'/>
+              <Button x:Name='SelRead' Content='읽음으로' Margin='0,0,5,5'/>
+              <Button x:Name='SelStar' Content='강조' Margin='0,0,5,5'/>
+              <Button x:Name='SelAll' Content='전부 고르기' ToolTip='Ctrl+A' Margin='0,0,5,5'/>
+              <Button x:Name='SelClear' Content='고르기 끝' ToolTip='Esc' Margin='0,0,5,5'/>
+            </WrapPanel>
+          </StackPanel>
+        </Border>
+        <Border x:Name='GuidePanel' Visibility='Collapsed' Margin='8,4,8,0' Padding='10,7,10,7' CornerRadius='8' Background='#202228'>
+          <Grid x:Name='GuideGrid' TextBlock.FontSize='11'/>
+        </Border>
+        <Border Margin='0,4,0,0' BorderBrush='#24262D' BorderThickness='0,1,0,0' Padding='8,3,16,4'>
+          <DockPanel>
+            <StackPanel DockPanel.Dock='Right' Orientation='Horizontal' VerticalAlignment='Center'>
+              <TextBlock x:Name='Updated' Foreground='#5E606A' FontSize='11' VerticalAlignment='Center' Margin='0,0,2,0'/>
+              <Button x:Name='BtnGuide' Style='{StaticResource Icon}' Content='&#xE897;'/>
+            </StackPanel>
+            <WrapPanel x:Name='FoldRow' VerticalAlignment='Center'>
+              <Button x:Name='BtnDone' Style='{StaticResource Link}' ToolTip='확인 끝: 새 대화가 시작되거나 새 답이 오면 다시 올라옴 · 펼치기 / 접기'/>
+              <Button x:Name='BtnHeld' Style='{StaticResource Link}' ToolTip='미룬 것(일단 보류): 「미루기 풀기」 할 때까지 접혀 있음 · 펼치기 / 접기'/>
+              <Button x:Name='BtnOff' Style='{StaticResource Link}' ToolTip='위젯에 올리지 않은 세션: 오른쪽 클릭 「위젯에 올리기」 · 펼치기 / 접기'/>
+            </WrapPanel>
+          </DockPanel>
+        </Border>
+      </StackPanel>
+      <ScrollViewer VerticalScrollBarVisibility='Auto' Margin='4,2,2,0'>
+        <StackPanel x:Name='List' Margin='0,0,0,6'/>
       </ScrollViewer>
     </DockPanel>
   </Border>
@@ -315,7 +424,12 @@ namespace SessionWidget
 
             Window = (Window)XamlReader.Parse(Xaml.Replace("{TITLE}", Config.Title));
             header = (FrameworkElement)Window.FindName("Header");
-            summary = (TextBlock)Window.FindName("Summary");
+            tileNeeds = (Border)Window.FindName("TileNeeds");
+            statNeeds = (TextBlock)Window.FindName("StatNeeds");
+            statRun = (TextBlock)Window.FindName("StatRun");
+            statUnread = (TextBlock)Window.FindName("StatUnread");
+            needsLabel = (TextBlock)Window.FindName("NeedsLabel");
+            updatedText = (TextBlock)Window.FindName("Updated");
             subLine = (TextBlock)Window.FindName("SubLine");
             accountLine = (TextBlock)Window.FindName("Account");
             list = (StackPanel)Window.FindName("List");
@@ -357,10 +471,12 @@ namespace SessionWidget
             foldRow = (FrameworkElement)Window.FindName("FoldRow");
             btnBoardView = (Button)Window.FindName("BtnBoardView");
             btnBoardView.Click += (s, e) => BoardViewing();
+            ToolTipService.SetShowOnDisabled(btnBoardView, true);
             btnOff.Click += (s, e) => { showOff = !showOff; SaveSettings(); Render(); if (showOff) ShowSection("off"); };
             btnGuide = (Button)Window.FindName("BtnGuide");
             guidePanel = (FrameworkElement)Window.FindName("GuidePanel");
             btnGuide.Click += (s, e) => { showGuide = !showGuide; SaveSettings(); UpdateGuide(); };
+            BuildGuide();
             UpdateGuide();
             Window.PreviewKeyDown += (s, e) =>
             {
@@ -481,6 +597,7 @@ namespace SessionWidget
             boardInit = d.ContainsKey("boardInit") && d["boardInit"] is bool && (bool)d["boardInit"];
             knownIds = StrSet(Get(d, "knownIds"));
             collapsedGroups = StrSet(Get(d, "collapsedGroups"));
+            openRead = StrSet(Get(d, "openReadGroups"));
 
             // 모니터 구성이 바뀌어 화면 밖이면 오른쪽 위로
             var vs = new Rect(SystemParameters.VirtualScreenLeft, SystemParameters.VirtualScreenTop,
@@ -515,6 +632,7 @@ namespace SessionWidget
             d["boardInit"] = boardInit;
             d["knownIds"] = knownIds.OrderBy(x => x, StringComparer.Ordinal).ToList();
             d["collapsedGroups"] = collapsedGroups.OrderBy(x => x, StringComparer.Ordinal).ToList();
+            d["openReadGroups"] = openRead.OrderBy(x => x, StringComparer.Ordinal).ToList();
             WriteJson(settingsFile, d);
         }
 
@@ -607,7 +725,7 @@ namespace SessionWidget
                 if (v == null || (v is string && (string)v == "")) map[id].Remove(k);
             }
             try { WriteJson(metaFile, map); }
-            catch (Exception ex) { subLine.Text = "표시 저장 실패: " + ex.Message; }
+            catch (Exception ex) { ShowStatus("표시 저장 실패: " + ex.Message, Config.ColorError); }
             meta = map;
             Render();
         }
@@ -723,7 +841,7 @@ namespace SessionWidget
         void SafePoll()
         {
             try { Poll(); }
-            catch (Exception ex) { subLine.Text = "위젯 오류: " + ex.Message; }
+            catch (Exception ex) { ShowStatus("위젯 오류: " + ex.Message, Config.ColorError); }
         }
 
         void Poll()
@@ -854,7 +972,7 @@ namespace SessionWidget
                     map[x.Id]["board"] = true;
                 }
                 try { WriteJson(metaFile, map); meta = map; }
-                catch (Exception ex) { subLine.Text = "표시 저장 실패: " + ex.Message; }
+                catch (Exception ex) { ShowStatus("표시 저장 실패: " + ex.Message, Config.ColorError); }
             }
             if (add.Count > 0 || firstTime) SaveSettings();
             return add.Count > 0;
@@ -867,6 +985,75 @@ namespace SessionWidget
             return (Brush)new BrushConverter().ConvertFromString(hex);
         }
 
+        // 시안 B(11/18): 바탕은 무채색, 색은 확인 필요(분홍) · 안 읽음(파랑 점) · 작업 중(주황 점) · 강조(노랑 별)에만
+        const string CInk = "#E8E8EA";       // 본문 글
+        const string CInkDim = "#A6A8B0";    // 읽은 세션 제목
+        const string CInkMuted = "#6E7079";  // 시간 · 개수 · 흐린 아이콘
+        const string CSurface = "#202228";   // 카드 · 타일 바탕
+        const string CLine = "#2E3038";      // 카드 테두리
+        const string CHover = "#1F2127";     // 줄에 마우스
+        const string CViewingBg = "#22252E"; // 앱에서 보는 세션 줄 바탕
+        const string CPickBg = "#1F2A3D";    // 고른 것
+        const string CPickLine = "#8FB8FF";
+        const string IconFont = "Segoe Fluent Icons, Segoe MDL2 Assets";
+
+        /// 윈도우 기본 아이콘 글꼴(Segoe Fluent Icons)의 글자 하나
+        static TextBlock Glyph(string code, string color, double size)
+        {
+            var t = new TextBlock();
+            t.Text = code;
+            t.FontFamily = new FontFamily(IconFont);
+            t.FontSize = size;
+            t.Foreground = B(color);
+            t.VerticalAlignment = VerticalAlignment.Center;
+            return t;
+        }
+
+        /// 원격 제어 꺼짐: 사슬(연결) 아이콘에 빗금
+        static FrameworkElement RemoteOffIcon()
+        {
+            var g = new Grid();
+            g.Width = 14;
+            g.Height = 14;
+            g.VerticalAlignment = VerticalAlignment.Center;
+            var t = Glyph("", "#6E7079", 12);
+            t.HorizontalAlignment = HorizontalAlignment.Center;
+            g.Children.Add(t);
+            var ln = new System.Windows.Shapes.Line();
+            ln.X1 = 1; ln.Y1 = 13; ln.X2 = 13; ln.Y2 = 1;
+            ln.Stroke = B("#8A8C95");
+            ln.StrokeThickness = 1.3;
+            g.Children.Add(ln);
+            g.ToolTip = "원격 제어 꺼짐";
+            return g;
+        }
+
+        static string AgoShort(long ms)
+        {
+            if (ms <= 0) return "";
+            long min = (NowMs() - ms) / 60000;
+            if (min < 1) return "방금";
+            if (min < 60) return min + "분";
+            long hr = min / 60;
+            if (hr < 24) return hr + "시간";
+            return (hr / 24) + "일";
+        }
+
+        /// 오늘이면 14:30, 아니면 11.19 09:00
+        static string ClockShort(long ms)
+        {
+            var t = ToLocal(ms);
+            var n = ToLocal(NowMs());
+            return t.ToString(t.Date == n.Date ? "HH:mm" : "MM.dd HH:mm", CultureInfo.InvariantCulture);
+        }
+
+        void ShowStatus(string text, string color)
+        {
+            subLine.Text = text;
+            subLine.Foreground = B(color);
+            subLine.Visibility = text == "" ? Visibility.Collapsed : Visibility.Visible;
+        }
+
         void Render()
         {
             long now = NowMs();
@@ -874,30 +1061,27 @@ namespace SessionWidget
             int heldCount = sessions.Count(s => IsHeld(s, MetaOf(s.Id)));
             int heldNewCount = sessions.Count(s => IsHeld(s, MetaOf(s.Id)) && HeldNew(s, MetaOf(s.Id)));
             int doneCount = sessions.Count(s => IsDone(s, MetaOf(s.Id)));
-            btnHeld.Content = (showHeld ? "▾ " : "▸ ") + "⏸ 미룬 것 " + heldCount + (heldNewCount > 0 ? " · 새 답 " + heldNewCount : "");
-            btnHeld.Visibility = heldCount > 0 ? Visibility.Visible : Visibility.Collapsed;
-            btnDone.Content = (showDone ? "▾ " : "▸ ") + "✓ 확인 끝 " + doneCount;
-            btnDone.Visibility = doneCount > 0 ? Visibility.Visible : Visibility.Collapsed;
             int offCount = sessions.Count(s => !IsOn(MetaOf(s.Id)));
-            btnOff.Content = (showOff ? "▾ " : "▸ ") + "＋ 위젯에 없는 것 " + offCount;
+            btnDone.Content = (showDone ? "▾ " : "") + "확인 끝 " + doneCount;
+            btnDone.Visibility = doneCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+            btnHeld.Content = (showHeld ? "▾ " : "") + "미룸 " + heldCount + (heldNewCount > 0 ? " · 새 답 " + heldNewCount : "");
+            btnHeld.Visibility = heldCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+            btnOff.Content = (showOff ? "▾ " : "") + "안 올린 것 " + offCount;
             btnOff.Visibility = offCount > 0 ? Visibility.Visible : Visibility.Collapsed;
             foldRow.Visibility = (offCount > 0 || heldCount > 0 || doneCount > 0) ? Visibility.Visible : Visibility.Collapsed;
+
             var viewing = sessions.FirstOrDefault(x => x.Id == viewFocused);
             if (viewing == null)
             {
-                btnBoardView.Content = "👁 지금 보는 세션 올리기";
-                btnBoardView.ToolTip = "앱에서 보고 있는 세션을 아직 모릅니다(앱 창에 세션을 띄우면 알게 됨)";
+                btnBoardView.ToolTip = "지금 보는 세션 — 앱 창에 세션을 띄우면 쓸 수 있습니다";
                 btnBoardView.IsEnabled = false;
-                btnBoardView.Opacity = 0.5;
             }
             else
             {
                 bool there = InMain(viewing, MetaOf(viewing.Id));
-                btnBoardView.Content = there ? "👁 지금 보는 세션으로 가기" : "👁 지금 보는 세션 올리기";
-                btnBoardView.ToolTip = (there ? "위젯 목록에서 그 카드로 이동" : "위젯에 올리고(미루기 · 확인 끝도 풀고) 그 카드로 이동")
-                    + "\n앱에서 보는 세션: " + viewing.Title;
+                btnBoardView.ToolTip = (there ? "지금 보는 세션으로 가기" : "지금 보는 세션 올리기 (미루기 · 확인 끝도 풀고 그 줄로)")
+                    + "\n" + viewing.Title;
                 btnBoardView.IsEnabled = true;
-                btnBoardView.Opacity = 1;
             }
             UpdatePinButton();
 
@@ -906,29 +1090,21 @@ namespace SessionWidget
             int unread = visible.Count(s => IsUnread(s, MetaOf(s.Id)));
             int due = visible.Count(s => IsDue(MetaOf(s.Id)));
             int needs = visible.Count(s => IsNeeds(s));
-            summary.Text = "확인 필요 " + needs + " · 작업 중 " + running + " · 안 읽음 " + unread + (due > 0 ? " · ⏰ " + due : "");
+            statNeeds.Text = needs.ToString();
+            statRun.Text = running.ToString();
+            statUnread.Text = unread.ToString();
+            tileNeeds.Background = B(needs > 0 ? "#2A1E26" : CSurface);
+            statNeeds.Foreground = B(needs > 0 ? "#FF9DBA" : CInk);
+            needsLabel.Foreground = B(needs > 0 ? "#C9A3B2" : "#8B8D96");
 
             accountLine.Text = accountText;
-            if (updatedAtMs == 0)
-            {
-                subLine.Text = Config.MsgWaiting;
-                subLine.Foreground = B(Config.ColorWarn);
-            }
-            else if (panelError != "")
-            {
-                subLine.Text = panelError;
-                subLine.Foreground = B(Config.ColorError);
-            }
-            else if (now - updatedAtMs > Config.StaleSeconds * 1000L)
-            {
-                subLine.Text = string.Format(Config.MsgStale, AgoText(updatedAtMs));
-                subLine.Foreground = B(Config.ColorWarn);
-            }
-            else
-            {
-                subLine.Text = "세션 " + visible.Count + "개 · 갱신 " + TimeText(updatedAtMs);
-                subLine.Foreground = B("#99FFFFFF");
-            }
+            if (updatedAtMs == 0) ShowStatus(Config.MsgWaiting, Config.ColorWarn);
+            else if (panelError != "") ShowStatus(panelError, Config.ColorError);
+            else if (now - updatedAtMs > Config.StaleSeconds * 1000L) ShowStatus(string.Format(Config.MsgStale, AgoText(updatedAtMs)), Config.ColorWarn);
+            else if (due > 0) ShowStatus("리마인드 시간이 지난 세션 " + due + "개", Config.ColorDue);
+            else ShowStatus("", CInk);
+            updatedText.Text = updatedAtMs > 0 ? "갱신 " + ToLocal(updatedAtMs).ToString("HH:mm", CultureInfo.InvariantCulture) : "";
+            updatedText.ToolTip = "위젯에 올린 세션 " + visible.Count + "개 · 마지막 갱신 " + (updatedAtMs > 0 ? TimeText(updatedAtMs) : "없음");
 
             // 목록에서 사라진 세션은 고른 것에서도 뺀다
             var alive = new HashSet<string>(sessions.Select(x => x.Id));
@@ -943,8 +1119,18 @@ namespace SessionWidget
                 .OrderBy(s => Rank(s, MetaOf(s.Id)))
                 .ThenByDescending(s => s.LastActivityAt, StringComparer.Ordinal)
                 .ToList();
-            // 본문: 앱 사이드바 섹션별로 묶고(섹션 없음은 맨 아래), 섹션 안은 급한 순
-            var groups = sorted.Where(x => InMain(x, MetaOf(x.Id)))
+            var main = sorted.Where(x => InMain(x, MetaOf(x.Id))).ToList();
+
+            // 맨 위: 확인 필요는 섹션과 상관없이 카드로(질문 미리 보기 + 열기 · 미루기 · 확인 끝)
+            var needsList = main.Where(x => IsNeeds(x)).ToList();
+            if (needsList.Count > 0)
+            {
+                list.Children.Add(HeadLine("확인 필요", needsList.Count, null, "#C9A3B2"));
+                foreach (var s in needsList) list.Children.Add(MakeNeedsCard(s, MetaOf(s.Id)));
+            }
+
+            // 그 아래: 앱 사이드바 섹션별 한 줄 목록(섹션 없음은 맨 아래). 읽은 것은 「더 보기」 로 접어 둔다
+            var groups = main.Where(x => !IsNeeds(x))
                 .GroupBy(x => x.Group)
                 .OrderBy(g => g.Key == "" ? 1 : 0)
                 .ThenBy(g => g.Key, StringComparer.CurrentCulture)
@@ -953,11 +1139,7 @@ namespace SessionWidget
             {
                 string key = g.Key;
                 bool folded = collapsedGroups.Contains(key);
-                int gNeeds = g.Count(x => IsNeeds(x));
-                int gUnread = g.Count(x => IsUnread(x, MetaOf(x.Id)));
-                int gRun = g.Count(x => x.IsRunning);
-                var head = GroupLine((folded ? "▸ " : "▾ ") + (key == "" ? "섹션 없음" : key) + "  " + g.Count()
-                    + (gNeeds > 0 ? " · 🙋 " + gNeeds : "") + (gUnread > 0 ? " · 💬 " + gUnread : "") + (gRun > 0 ? " · ● " + gRun : ""));
+                var head = HeadLine(key == "" ? "섹션 없음" : key, g.Count(), folded, "#9A9CA5");
                 head.MouseLeftButtonUp += (o, e) =>
                 {
                     if (!collapsedGroups.Remove(key)) collapsedGroups.Add(key);
@@ -966,212 +1148,420 @@ namespace SessionWidget
                 };
                 list.Children.Add(head);
                 if (folded) continue;
-                foreach (var s in g) list.Children.Add(MakeCard(s, MetaOf(s.Id), "main"));
+                var quiet = g.Where(x => IsQuiet(x, MetaOf(x.Id))).ToList();
+                foreach (var s in g)
+                    if (!quiet.Contains(s)) list.Children.Add(MakeRow(s, MetaOf(s.Id), "main"));
+                if (quiet.Count > 0)
+                {
+                    bool open = openRead.Contains(key);
+                    if (open)
+                        foreach (var s in quiet) list.Children.Add(MakeRow(s, MetaOf(s.Id), "main"));
+                    var more = MoreLine(open ? "읽은 것 접기" : "읽은 것 " + quiet.Count + "개 더 보기");
+                    more.MouseLeftButtonUp += (o, e) =>
+                    {
+                        if (!openRead.Remove(key)) openRead.Add(key);
+                        SaveSettings();
+                        Render();
+                    };
+                    list.Children.Add(more);
+                }
             }
-            if (groups.Count == 0 && updatedAtMs != 0)
-                list.Children.Add(SectionLine("위젯에 올린 세션이 없습니다 — 「＋ 위젯에 없는 것」에서 올리세요"));
+            if (needsList.Count == 0 && groups.Count == 0 && updatedAtMs != 0)
+                list.Children.Add(Note("위젯에 올린 세션이 없습니다. 아래 「안 올린 것」에서 올리세요."));
 
             if (showHeld && heldCount > 0)
             {
-                var sec_held = SectionLine("⏸ 미룬 것 — 「미루기 풀기」 할 때까지 여기 · 알림 없음 · 리마인드는 울림");
-                sectionById["held"] = sec_held;
-                list.Children.Add(sec_held);
+                var sec = HeadLine("미룬 것", heldCount, null, "#9A9CA5");
+                sectionById["held"] = sec;
+                list.Children.Add(sec);
+                list.Children.Add(Note("「미루기 풀기」 할 때까지 여기 있습니다. 알림은 없고, 리마인드는 울립니다."));
                 foreach (var s in sorted.Where(x => IsHeld(x, MetaOf(x.Id))))
-                    list.Children.Add(MakeCard(s, MetaOf(s.Id), "held"));
+                    list.Children.Add(MakeRow(s, MetaOf(s.Id), "held"));
             }
             if (showDone && doneCount > 0)
             {
-                var sec_done = SectionLine("✓ 확인 끝 — 새 대화가 시작되거나 새 답이 오면 다시 올라옴");
-                sectionById["done"] = sec_done;
-                list.Children.Add(sec_done);
+                var sec = HeadLine("확인 끝", doneCount, null, "#9A9CA5");
+                sectionById["done"] = sec;
+                list.Children.Add(sec);
+                list.Children.Add(Note("새 대화가 시작되거나 새 답이 오면 다시 올라옵니다."));
                 foreach (var s in sorted.Where(x => IsDone(x, MetaOf(x.Id))))
-                    list.Children.Add(MakeCard(s, MetaOf(s.Id), "done"));
+                    list.Children.Add(MakeRow(s, MetaOf(s.Id), "done"));
             }
             if (showOff && offCount > 0)
             {
-                var sec_off = SectionLine("＋ 위젯에 없는 것 — 오른쪽 클릭 「위젯에 올리기」 · 여러 개 골라 한꺼번에도 됨");
-                sectionById["off"] = sec_off;
-                list.Children.Add(sec_off);
+                var sec = HeadLine("안 올린 것", offCount, null, "#9A9CA5");
+                sectionById["off"] = sec;
+                list.Children.Add(sec);
+                list.Children.Add(Note("오른쪽 클릭 「위젯에 올리기」. 여러 개 골라 한꺼번에도 됩니다."));
                 foreach (var s in sessions.Where(x => !IsOn(MetaOf(x.Id)))
                                           .OrderByDescending(x => x.LastActivityAt, StringComparer.Ordinal))
-                    list.Children.Add(MakeCard(s, MetaOf(s.Id), "off"));
+                    list.Children.Add(MakeRow(s, MetaOf(s.Id), "off"));
             }
         }
 
-        /// 섹션 이름 줄(누르면 접고 펼침)
-        static Border GroupLine(string text)
+        /// 「읽은 것 더 보기」 로 접어 둘 줄: 읽었고, 작업 중 · 강조 · 리마인드가 아니고, 지금 보거나 고른 것도 아님
+        bool IsQuiet(Session s, Dictionary<string, object> m)
         {
+            return !s.IsRunning && !IsUnread(s, m) && !Bool(m, "star") && Long(m, "remindAt") == 0
+                && s.Id != viewFocused && !selected.Contains(s.Id);
+        }
+
+        /// 칸 머리 줄: 이름 · 오른쪽 개수. folded 가 있으면 접기 표시(누르면 접고 펼침)
+        static Border HeadLine(string name, int count, bool? folded, string color)
+        {
+            var dp = new DockPanel();
+            var c = new TextBlock();
+            c.Text = count.ToString();
+            c.Foreground = B(CInkMuted);
+            c.FontSize = 11;
+            DockPanel.SetDock(c, Dock.Right);
+            dp.Children.Add(c);
+            if (folded.HasValue)
+            {
+                var ch = Glyph(folded.Value ? "" : "", CInkMuted, 8);
+                ch.Margin = new Thickness(0, 1, 7, 0);
+                DockPanel.SetDock(ch, Dock.Left);
+                dp.Children.Add(ch);
+            }
             var t = new TextBlock();
-            t.Text = text;
-            t.TextWrapping = TextWrapping.Wrap;
-            t.Foreground = B("#DDFFFFFF");
-            t.FontSize = 11.5;
-            t.FontWeight = FontWeights.Bold;
+            t.Text = name;
+            t.Foreground = B(color);
+            t.FontSize = 11;
+            t.FontWeight = FontWeights.SemiBold;
+            t.TextTrimming = TextTrimming.CharacterEllipsis;
+            dp.Children.Add(t);
             var b = new Border();
-            b.Child = t;
-            b.Background = B("#0FFFFFFF");
-            b.CornerRadius = new CornerRadius(4);
-            b.Padding = new Thickness(6, 3, 6, 3);
-            b.Margin = new Thickness(0, 4, 0, 4);
-            b.Cursor = Cursors.Hand;
+            b.Child = dp;
+            b.Background = Brushes.Transparent;
+            b.Padding = new Thickness(10, 12, 10, 5);
+            if (folded.HasValue) b.Cursor = Cursors.Hand;
             return b;
         }
 
-        static TextBlock SectionLine(string text)
+        static Border MoreLine(string text)
+        {
+            var t = new TextBlock();
+            t.Text = text;
+            t.Foreground = B(CInkMuted);
+            t.FontSize = 11;
+            var b = new Border();
+            b.Child = t;
+            b.Background = Brushes.Transparent;
+            b.Padding = new Thickness(25, 4, 10, 6);
+            b.Cursor = Cursors.Hand;
+            b.MouseEnter += (o, e) => t.Foreground = B(CInkDim);
+            b.MouseLeave += (o, e) => t.Foreground = B(CInkMuted);
+            return b;
+        }
+
+        static TextBlock Note(string text)
         {
             var t = new TextBlock();
             t.Text = text;
             t.TextWrapping = TextWrapping.Wrap;
-            t.Foreground = B("#88FFFFFF");
+            t.Foreground = B(CInkMuted);
             t.FontSize = 11;
-            t.FontWeight = FontWeights.Bold;
-            t.Margin = new Thickness(4, 8, 0, 4);
+            t.Margin = new Thickness(10, 0, 10, 4);
             return t;
         }
 
-        /// kind: main(목록) · held(미룬 것) · done(확인 끝) · off(위젯에 없는 것)
-        Border MakeCard(Session s, Dictionary<string, object> m, string kind)
+        /// 마우스를 올리면 보이는 자세한 글(정확한 시각 · 원격 제어 · 리마인드 · 메모)
+        string RowTip(Session s, Dictionary<string, object> m)
         {
-            bool isLowered = kind != "main";
-            bool isPicked = selected.Contains(s.Id);
-            renderOrder.Add(s.Id);
-            bool unreadNow = IsUnread(s, m);
-            bool needsNow = IsNeeds(s);
-            bool star = Bool(m, "star");
+            var sb = new StringBuilder(s.Title);
             long last = IsoMs(s.LastActivityAt);
+            string state = s.IsRunning ? "작업 중" : IsNeeds(s) ? "확인 필요" : IsUnread(s, m) ? "답 왔음 · 안 읽음" : "읽음";
+            sb.Append("\n" + state + " · " + (last > 0 ? AgoText(last) + " (" + ClockText(last) + ")" : "시간 모름"));
+            sb.Append("\n원격 제어 " + (s.Remote ? "켜짐" : "꺼짐"));
+            long remindAt = Long(m, "remindAt");
+            if (remindAt > 0) sb.Append("\n리마인드 " + ClockText(remindAt) + (IsDue(m) ? " (지남)" : ""));
+            string memo = Str(m, "memo");
+            if (memo != "") sb.Append("\n메모: " + memo);
+            if (s.Id == viewFocused) sb.Append("\n앱에서 지금 보는 세션");
+            return sb.ToString();
+        }
 
-            string state; string color;
-            if (s.IsRunning) { state = "● 작업 중"; color = Config.ColorRunning; }
-            else if (needsNow) { state = "🙋 확인 필요"; color = Config.ColorNeeds; }
-            else if (unreadNow) { state = "💬 답 왔음 · 안 읽음"; color = Config.ColorUnread; }
-            else { state = "✓ 읽음"; color = Config.ColorRead; }
-            string accent = IsDue(m) ? Config.ColorDue : color;
-
-            var card = new Border();
-            card.CornerRadius = new CornerRadius(6);
-            card.Background = B(needsNow ? "#2EFF7AA2" : unreadNow ? "#2A6CB6FF" : "#14FFFFFF");
-            card.BorderBrush = B(accent);
-            card.BorderThickness = new Thickness(3, 0, 0, 0);
-            card.Margin = new Thickness(0, 0, 0, 5);
-            card.Padding = new Thickness(8, 5, 8, 5);
-            card.Cursor = Cursors.Hand;
-            card.ToolTip = s.Title;
-            if (isLowered) card.Opacity = kind == "held" ? 0.7 : kind == "off" ? 0.55 : 0.45;
-            if (isPicked)
+        /// 제목 줄: [고르기 네모 / 상태 점] [별] 제목 … [새 답] [리마인드] [메모] [원격 꺼짐] 시간
+        DockPanel TitleLine(Session s, Dictionary<string, object> m, bool card, string kind)
+        {
+            bool unread = IsUnread(s, m);
+            bool star = Bool(m, "star");
+            bool picked = selected.Contains(s.Id);
+            var dp = new DockPanel();
+            if (selectMode || selected.Count > 0)
             {
-                // 고른 카드: 파란 바탕 + 테두리, 흐린 칸에 있어도 또렷하게
-                card.Background = B("#55508CFF");
-                card.BorderBrush = B("#8FB8FF");
-                card.BorderThickness = new Thickness(3, 1, 1, 1);
-                card.Opacity = 1;
+                var cb = Glyph(picked ? "" : "", picked ? CPickLine : CInkMuted, 12);
+                cb.Margin = new Thickness(0, 0, 7, 0);
+                DockPanel.SetDock(cb, Dock.Left);
+                dp.Children.Add(cb);
             }
-            // 앱 메인 창에서 포커스가 있는 세션: 하늘색 굵은 테두리(분할 칸 · 따로 띄운 창은 표시 안 함)
-            bool isViewing = s.Id == viewFocused;
-            if (isViewing)
+            else if (!card)
             {
-                card.BorderBrush = B(Config.ColorViewing);
-                card.BorderThickness = new Thickness(3, 2, 2, 2);
-                card.Opacity = 1;
+                var dot = new System.Windows.Shapes.Ellipse();
+                dot.Width = 7;
+                dot.Height = 7;
+                dot.Margin = new Thickness(1, 0, 9, 0);
+                dot.VerticalAlignment = VerticalAlignment.Center;
+                if (s.IsRunning) dot.Fill = B(Config.ColorRunning);
+                else if (unread) dot.Fill = B(Config.ColorUnread);
+                else { dot.Stroke = B("#4A4C55"); dot.StrokeThickness = 1; }
+                DockPanel.SetDock(dot, Dock.Left);
+                dp.Children.Add(dot);
             }
-            cardById[s.Id] = card;
+            if (star)
+            {
+                var st = Glyph("", Config.ColorStar, 11);
+                st.Margin = new Thickness(0, 0, 5, 0);
+                DockPanel.SetDock(st, Dock.Left);
+                dp.Children.Add(st);
+            }
 
-            var stack = new StackPanel();
+            // 오른쪽은 먼저 넣은 것이 맨 오른쪽
+            var time = new TextBlock();
+            time.FontSize = 11;
+            time.Margin = new Thickness(8, 0, 0, 0);
+            time.VerticalAlignment = VerticalAlignment.Center;
+            if (s.IsRunning) { time.Text = "작업 중"; time.Foreground = B(Config.ColorRunning); }
+            else { time.Text = AgoShort(IsoMs(s.LastActivityAt)); time.Foreground = B(CInkMuted); }
+            DockPanel.SetDock(time, Dock.Right);
+            dp.Children.Add(time);
+            if (!s.Remote)
+            {
+                var r = RemoteOffIcon();
+                r.Margin = new Thickness(6, 0, 0, 0);
+                DockPanel.SetDock(r, Dock.Right);
+                dp.Children.Add(r);
+            }
+            if (!card)
+            {
+                string memo = Str(m, "memo");
+                if (memo != "")
+                {
+                    var mi = Glyph("", "#8B8D96", 11);
+                    mi.Margin = new Thickness(6, 0, 0, 0);
+                    DockPanel.SetDock(mi, Dock.Right);
+                    dp.Children.Add(mi);
+                }
+                long remindAt = Long(m, "remindAt");
+                if (remindAt > 0)
+                {
+                    var al = Glyph("", IsDue(m) ? Config.ColorDue : Config.ColorRemind, 11);
+                    al.Margin = new Thickness(6, 0, 0, 0);
+                    DockPanel.SetDock(al, Dock.Right);
+                    dp.Children.Add(al);
+                }
+            }
+            if (kind == "held" && HeldNew(s, m))
+            {
+                var nw = new TextBlock();
+                nw.Text = "새 답";
+                nw.FontSize = 10.5;
+                nw.Foreground = B(Config.ColorUnread);
+                nw.Margin = new Thickness(6, 0, 0, 0);
+                nw.VerticalAlignment = VerticalAlignment.Center;
+                DockPanel.SetDock(nw, Dock.Right);
+                dp.Children.Add(nw);
+            }
 
             var title = new TextBlock();
-            string box = isPicked ? "☑ " : (selectMode || selected.Count > 0) ? "☐ " : "";
-            title.Text = box + (kind == "held" ? "(미룸) " : kind == "done" ? "(확인 끝) " : "") + (star ? "★ " : "") + s.Title;
-            title.Foreground = B(star ? Config.ColorStar : "#FFFFFF");
-            title.FontWeight = (needsNow || unreadNow || star) ? FontWeights.Bold : FontWeights.Normal;
+            title.Text = s.Title;
             title.TextTrimming = TextTrimming.CharacterEllipsis;
-            stack.Children.Add(title);
+            title.VerticalAlignment = VerticalAlignment.Center;
+            bool strong = card || unread || s.IsRunning || star;
+            title.Foreground = B(strong ? CInk : CInkDim);
+            if (card || unread) title.FontWeight = FontWeights.SemiBold;
+            dp.Children.Add(title);
+            return dp;
+        }
 
-            // 상태 · 시간 · 원격 제어
-            var line = new TextBlock();
-            line.FontSize = 11;
-            line.TextWrapping = TextWrapping.Wrap;
-            var r1 = new Run(state);
-            r1.Foreground = B(color);
-            if (needsNow) r1.FontWeight = FontWeights.Bold;
-            var r2 = new Run(" · " + (last > 0 ? AgoText(last) + " (" + ClockText(last) + ")" : "시간 모름"));
-            r2.Foreground = B("#99FFFFFF");
-            var r3 = new Run(s.Remote ? " · 📡 원격 켜짐" : " · 원격 꺼짐");
-            r3.Foreground = B(s.Remote ? Config.ColorRemoteOn : "#66FFFFFF");
-            line.Inlines.Add(r1);
-            line.Inlines.Add(r2);
-            line.Inlines.Add(r3);
-            if (isViewing)
+        /// 한 줄 목록. kind: main(목록) · held(미룬 것) · done(확인 끝) · off(안 올린 것)
+        Border MakeRow(Session s, Dictionary<string, object> m, string kind)
+        {
+            renderOrder.Add(s.Id);
+            bool picked = selected.Contains(s.Id);
+            bool viewing = s.Id == viewFocused;
+            var row = new Border();
+            row.CornerRadius = new CornerRadius(6);
+            row.Padding = new Thickness(9, 5, 9, 5);
+            row.Margin = new Thickness(2, 0, 2, 1);
+            row.Cursor = Cursors.Hand;
+            row.ToolTip = RowTip(s, m);
+            row.Background = picked ? B(CPickBg) : viewing ? B(CViewingBg) : Brushes.Transparent;
+            if (picked)
             {
-                var r4 = new Run(" · 👁 보는 중");
-                r4.Foreground = B(Config.ColorViewing);
-                r4.FontWeight = FontWeights.Bold;
-                line.Inlines.Add(r4);
+                row.BorderBrush = B(CPickLine);
+                row.BorderThickness = new Thickness(1);
+                row.Padding = new Thickness(8, 4, 8, 4);
             }
-            stack.Children.Add(line);
-
-            if (kind == "held" && HeldNew(s, m)) stack.Children.Add(SmallLine("💬 미룬 뒤 새 답 있음", Config.ColorUnread, true));
-            if (needsNow && s.Ask != "") stack.Children.Add(SmallLine("→ " + s.Ask, Config.ColorNeedsAsk, false));
-
-            long remindAt = Long(m, "remindAt");
-            if (remindAt > 0)
+            if (kind != "main" && !picked) row.Opacity = kind == "held" ? 0.75 : 0.6;
+            var dp = TitleLine(s, m, false, kind);
+            if (viewing && !picked)
             {
-                if (IsDue(m)) stack.Children.Add(SmallLine("⏰ 리마인드 지남 (" + ClockText(remindAt) + ")", Config.ColorDue, true));
-                else stack.Children.Add(SmallLine("⏰ " + ClockText(remindAt), Config.ColorRemind, false));
+                // 앱에서 보는 세션: 줄 왼쪽 끝에 가는 선
+                var g = new Grid();
+                var bar = new System.Windows.Shapes.Rectangle();
+                bar.Width = 2;
+                bar.RadiusX = 1;
+                bar.RadiusY = 1;
+                bar.Fill = B(Config.ColorViewing);
+                bar.HorizontalAlignment = HorizontalAlignment.Left;
+                bar.Margin = new Thickness(-9, 0, 0, 0);
+                g.Children.Add(bar);
+                g.Children.Add(dp);
+                row.Child = g;
             }
-            string memo = Str(m, "memo");
-            if (memo != "") stack.Children.Add(SmallLine("📝 " + memo, "#B0FFFFFF", false));
-
-            card.Child = stack;
-
+            else row.Child = dp;
+            if (!picked && !viewing)
+            {
+                row.MouseEnter += (o, e) => row.Background = B(CHover);
+                row.MouseLeave += (o, e) => row.Background = Brushes.Transparent;
+            }
+            cardById[s.Id] = row;
+            row.ContextMenu = BuildMenu(s, m, kind);
             string id = s.Id;
-            var menu = new ContextMenu();
-            if (isPicked && selected.Count > 1)
+            row.MouseLeftButtonUp += (o, e) => OnCardClick(id);
+            return row;
+        }
+
+        /// 확인 필요 카드: 제목 · 질문 미리 보기 · 리마인드 · 메모 · 열기 / 미루기 / 확인 끝
+        Border MakeNeedsCard(Session s, Dictionary<string, object> m)
+        {
+            renderOrder.Add(s.Id);
+            bool picked = selected.Contains(s.Id);
+            bool viewing = s.Id == viewFocused;
+            string line = picked ? CPickLine : viewing ? Config.ColorViewing : CLine;
+            var card = new Border();
+            card.CornerRadius = new CornerRadius(10);
+            card.Background = B(picked ? CPickBg : CSurface);
+            card.BorderBrush = B(line);
+            card.BorderThickness = new Thickness(viewing && !picked ? 1.5 : 1);
+            card.Padding = new Thickness(11, 8, 11, 9);
+            card.Margin = new Thickness(4, 0, 4, 6);
+            card.Cursor = Cursors.Hand;
+            card.ToolTip = RowTip(s, m);
+            if (!picked && !viewing)
             {
-                // 고른 카드 위 오른쪽 클릭 = 고른 것 전부에
+                card.MouseEnter += (o, e) => card.BorderBrush = B("#464852");
+                card.MouseLeave += (o, e) => card.BorderBrush = B(CLine);
+            }
+            var stack = new StackPanel();
+            stack.Children.Add(TitleLine(s, m, true, "main"));
+            if (s.Ask != "")
+            {
+                var ask = new TextBlock();
+                ask.Text = s.Ask;
+                ask.Foreground = B("#B3B5BD");
+                ask.FontSize = 11.5;
+                ask.TextWrapping = TextWrapping.Wrap;
+                ask.TextTrimming = TextTrimming.CharacterEllipsis;
+                ask.MaxHeight = 50;
+                ask.Margin = new Thickness(0, 4, 0, 0);
+                stack.Children.Add(ask);
+            }
+            long remindAt = Long(m, "remindAt");
+            string memo = Str(m, "memo");
+            if (remindAt > 0 || memo != "")
+            {
+                var wp = new WrapPanel();
+                wp.Margin = new Thickness(0, 5, 0, 0);
+                if (remindAt > 0)
+                    wp.Children.Add(IconText("", IsDue(m) ? Config.ColorDue : Config.ColorRemind,
+                        (IsDue(m) ? "지남 · " : "") + ClockShort(remindAt)));
+                if (memo != "") wp.Children.Add(IconText("", "#8B8D96", memo));
+                stack.Children.Add(wp);
+            }
+            string id = s.Id;
+            var btns = new StackPanel();
+            btns.Orientation = Orientation.Horizontal;
+            btns.Margin = new Thickness(0, 8, 0, 0);
+            btns.Children.Add(CardButton("열기", true, () => DoAction("open", id)));
+            btns.Children.Add(CardButton("미루기", false, () => DoAction("hold", id)));
+            btns.Children.Add(CardButton("확인 끝", false, () => DoAction("done", id)));
+            stack.Children.Add(btns);
+            card.Child = stack;
+            cardById[s.Id] = card;
+            card.ContextMenu = BuildMenu(s, m, "main");
+            card.MouseLeftButtonUp += (o, e) => OnCardClick(id);
+            return card;
+        }
+
+        static FrameworkElement IconText(string glyph, string color, string text)
+        {
+            var sp = new StackPanel();
+            sp.Orientation = Orientation.Horizontal;
+            sp.Margin = new Thickness(0, 0, 12, 0);
+            var g = Glyph(glyph, color, 11);
+            g.Margin = new Thickness(0, 0, 4, 0);
+            sp.Children.Add(g);
+            var t = new TextBlock();
+            t.Text = text;
+            t.FontSize = 11;
+            t.Foreground = B(color == "#8B8D96" ? "#9A9CA5" : color);
+            t.TextTrimming = TextTrimming.CharacterEllipsis;
+            t.MaxWidth = 220;
+            sp.Children.Add(t);
+            return sp;
+        }
+
+        Button CardButton(string text, bool primary, Action act)
+        {
+            var b = new Button();
+            b.Content = text;
+            if (primary) b.Style = (Style)Window.FindResource("Primary");
+            b.Margin = new Thickness(0, 0, 6, 0);
+            b.Click += (o, e) => act();
+            return b;
+        }
+
+        /// 오른쪽 클릭 메뉴
+        ContextMenu BuildMenu(Session s, Dictionary<string, object> m, string kind)
+        {
+            string id = s.Id;
+            bool star = Bool(m, "star");
+            bool unreadNow = IsUnread(s, m);
+            long remindAt = Long(m, "remindAt");
+            var menu = new ContextMenu();
+            if (selected.Contains(id) && selected.Count > 1)
+            {
+                // 고른 것 위 오른쪽 클릭 = 고른 것 전부에
                 var head = new MenuItem();
                 head.Header = "고른 " + selected.Count + "개에 한꺼번에";
                 head.IsEnabled = false;
                 menu.Items.Add(head);
-                AddItem(menu, "✓ 확인 끝", () => Bulk("done"));
-                AddItem(menu, "⏸ 미루기 (일단 보류)", () => Bulk("hold"));
-                AddItem(menu, "⬆ 목록으로 (위젯에 올리고 미루기 · 확인 끝 풀기)", () => Bulk("up"));
-                AddItem(menu, "－ 위젯에서 빼기", () => Bulk("unboard"));
-                AddItem(menu, "읽음으로", () => Bulk("read"));
-                AddItem(menu, "★ 강조 / 해제", () => Bulk("star"));
+                AddItem(menu, "확인 끝", () => Bulk("done"), "");
+                AddItem(menu, "미루기 (일단 보류)", () => Bulk("hold"), "");
+                AddItem(menu, "목록으로 (위젯에 올리고 미루기 · 확인 끝 풀기)", () => Bulk("up"), "");
+                AddItem(menu, "위젯에서 빼기", () => Bulk("unboard"), "");
+                AddItem(menu, "읽음으로", () => Bulk("read"), "");
+                AddItem(menu, "강조 / 해제", () => Bulk("star"), "");
                 menu.Items.Add(new Separator());
                 AddItem(menu, "고르기 끝", () => EndSelect());
-                card.ContextMenu = menu;
-                card.MouseLeftButtonUp += (o, e) => OnCardClick(id);
-                return card;
+                return menu;
             }
-            AddItem(menu, "앱에서 열기", () => DoAction("open", id));
+            AddItem(menu, "앱에서 열기", () => DoAction("open", id), "");
             if (kind == "off")
             {
-                AddItem(menu, "＋ 위젯에 올리기", () => DoAction("board", id));
+                AddItem(menu, "위젯에 올리기", () => DoAction("board", id), "");
                 menu.Items.Add(new Separator());
-                AddItem(menu, "📝 메모…", () => DoAction("memo", id));
-                card.ContextMenu = menu;
-                card.MouseLeftButtonUp += (o, e) => OnCardClick(id);
-                return card;
+                AddItem(menu, "메모…", () => DoAction("memo", id), "");
+                return menu;
             }
-            AddItem(menu, star ? "강조 해제" : "★ 강조", () => DoAction("star", id));
-            AddItem(menu, unreadNow ? "읽음으로" : "안 읽음으로", () => DoAction("read", id));
+            AddItem(menu, star ? "강조 해제" : "강조", () => DoAction("star", id), "");
+            AddItem(menu, unreadNow ? "읽음으로" : "안 읽음으로", () => DoAction("read", id), "");
             menu.Items.Add(new Separator());
             bool held = Str(m, "heldAt") != "";
-            AddItem(menu, held ? "⬆ 미루기 풀기" : "⏸ 미루기 (일단 보류)", () => DoAction(held ? "unhold" : "hold", id));
-            AddItem(menu, kind == "done" ? "⬆ 다시 올리기" : "✓ 확인 끝", () => DoAction(kind == "done" ? "undone" : "done", id));
-            AddItem(menu, "－ 위젯에서 빼기", () => DoAction("unboard", id));
+            AddItem(menu, held ? "미루기 풀기" : "미루기 (일단 보류)", () => DoAction(held ? "unhold" : "hold", id), "");
+            AddItem(menu, kind == "done" ? "다시 올리기" : "확인 끝", () => DoAction(kind == "done" ? "undone" : "done", id), "");
+            AddItem(menu, "위젯에서 빼기", () => DoAction("unboard", id), "");
             menu.Items.Add(new Separator());
-            AddItem(menu, "⏰ 30분 뒤", () => DoAction("remind30", id));
-            AddItem(menu, "⏰ 1시간 뒤", () => DoAction("remind60", id));
-            AddItem(menu, "⏰ 3시간 뒤", () => DoAction("remind180", id));
-            AddItem(menu, "⏰ 내일 " + Config.TomorrowHour + "시", () => DoAction("remindTomorrow", id));
-            if (remindAt > 0) AddItem(menu, "알람 끄기", () => DoAction("remindOff", id));
+            AddItem(menu, "리마인드 30분 뒤", () => DoAction("remind30", id), "");
+            AddItem(menu, "리마인드 1시간 뒤", () => DoAction("remind60", id));
+            AddItem(menu, "리마인드 3시간 뒤", () => DoAction("remind180", id));
+            AddItem(menu, "리마인드 내일 " + Config.TomorrowHour + "시", () => DoAction("remindTomorrow", id));
+            if (remindAt > 0) AddItem(menu, "리마인드 끄기", () => DoAction("remindOff", id));
             menu.Items.Add(new Separator());
-            AddItem(menu, "📝 메모…", () => DoAction("memo", id));
-            card.ContextMenu = menu;
-
-            card.MouseLeftButtonUp += (o, e) => OnCardClick(id);
-            return card;
+            AddItem(menu, "메모…", () => DoAction("memo", id), "");
+            return menu;
         }
 
         /// 펼친 칸의 머리 줄로 스크롤(그리기가 끝난 뒤)
@@ -1192,6 +1582,7 @@ namespace SessionWidget
             if (s == null) return;
             string id = s.Id;
             collapsedGroups.Remove(s.Group);
+            openRead.Add(s.Group);
             if (!InMain(s, MetaOf(id)))
                 ChangeMeta(id, m => { m["board"] = true; m["heldAt"] = null; m["hiddenAt"] = null; });
             SaveSettings();
@@ -1202,54 +1593,113 @@ namespace SessionWidget
 
         // ---------- 고정 ----------
 
-        /// 「고정 해제」 아이콘: 흐린 📌 위에 빨간 사선
-        static object UnpinnedIcon()
+        /// 맨 아래 가이드: 동작 하나당 한 줄 + 아이콘 뜻
+        void BuildGuide()
         {
-            var g = new Grid();
-            var t = new TextBlock();
-            t.Text = "📌";
-            t.Opacity = 0.55;
-            g.Children.Add(t);
-            var line = new System.Windows.Shapes.Line();
-            line.X1 = 0; line.Y1 = 14; line.X2 = 14; line.Y2 = 0;
-            line.Stroke = B("#FF6B6B");
-            line.StrokeThickness = 2;
-            line.HorizontalAlignment = HorizontalAlignment.Center;
-            line.VerticalAlignment = VerticalAlignment.Center;
-            g.Children.Add(line);
-            return g;
+            var grid = (Grid)Window.FindName("GuideGrid");
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            grid.ColumnDefinitions.Add(new ColumnDefinition());
+            string[,] rows = {
+                { "줄 · 카드 클릭", "앱에서 그 세션 열기 + 읽음 표시" },
+                { "오른쪽 클릭", "강조 · 미루기 · 확인 끝 · 위젯에서 빼기 · 리마인드 · 메모" },
+                { "확인 필요 카드", "열기 · 미루기(일단 보류) · 확인 끝 버튼" },
+                { "섹션 이름 클릭", "그 섹션 접기 · 펼치기" },
+                { "읽은 것 더 보기", "읽은 세션 펼치기 · 접기" },
+                { "Ctrl + 클릭", "하나씩 고르기 · 풀기" },
+                { "Shift + 클릭", "지난번 고른 것부터 여기까지 전부 고르기" },
+                { "Ctrl + A / Esc", "목록 전부 고르기 / 고르기 끝" },
+                { "고정 버튼", "누를 때마다 고정 → 중간 → 고정 해제" },
+                { "최소화 버튼", "작업 표시줄로 내리기(고정 중에는 꺼짐)" },
+                { "트레이 아이콘", "더블클릭으로 다시 띄우기 · 오른쪽 클릭 메뉴" },
+            };
+            int r = 0;
+            for (int i = 0; i < rows.GetLength(0); i++, r++)
+            {
+                grid.RowDefinitions.Add(new RowDefinition());
+                var a = new TextBlock();
+                a.Text = rows[i, 0];
+                a.Foreground = B(CInk);
+                a.Margin = new Thickness(0, 1, 12, 1);
+                Grid.SetRow(a, r);
+                grid.Children.Add(a);
+                var b = new TextBlock();
+                b.Text = rows[i, 1];
+                b.Foreground = B(CInkDim);
+                b.TextWrapping = TextWrapping.Wrap;
+                b.Margin = new Thickness(0, 1, 0, 1);
+                Grid.SetRow(b, r);
+                Grid.SetColumn(b, 1);
+                grid.Children.Add(b);
+            }
+            // 아이콘 뜻
+            var icons = new List<KeyValuePair<FrameworkElement, string>>();
+            icons.Add(new KeyValuePair<FrameworkElement, string>(Glyph("", Config.ColorStar, 11), "강조"));
+            icons.Add(new KeyValuePair<FrameworkElement, string>(Glyph("", Config.ColorRemind, 11), "리마인드 (빨강 = 시간 지남)"));
+            icons.Add(new KeyValuePair<FrameworkElement, string>(Glyph("", "#8B8D96", 11), "메모"));
+            icons.Add(new KeyValuePair<FrameworkElement, string>(RemoteOffIcon(), "원격 제어 꺼짐"));
+            bool first = true;
+            foreach (var kv in icons)
+            {
+                grid.RowDefinitions.Add(new RowDefinition());
+                var el = kv.Key;
+                el.HorizontalAlignment = HorizontalAlignment.Left;
+                el.Margin = new Thickness(2, first ? 7 : 1, 0, 1);
+                Grid.SetRow(el, r);
+                grid.Children.Add(el);
+                var b = new TextBlock();
+                b.Text = kv.Value;
+                b.Foreground = B(CInkDim);
+                b.Margin = new Thickness(0, first ? 7 : 1, 0, 1);
+                Grid.SetRow(b, r);
+                Grid.SetColumn(b, 1);
+                grid.Children.Add(b);
+                first = false;
+                r++;
+            }
         }
 
         void UpdateGuide()
         {
             guidePanel.Visibility = showGuide ? Visibility.Visible : Visibility.Collapsed;
-            btnGuide.Content = showGuide ? "▾ 가이드 감추기" : "▸ 가이드 보기";
+            btnGuide.Background = showGuide ? B("#2A2C33") : Brushes.Transparent;
+            btnGuide.Foreground = B(showGuide ? CInk : "#8B8D96");
+            btnGuide.ToolTip = showGuide ? "가이드 감추기" : "가이드 보기 — 위젯 쓰는 법";
         }
 
         void UpdatePinButton()
         {
-            const string cycle = "\n\n누를 때마다:  📌 고정  →  ↓📌 중간  →  고정 해제  →  📌 …";
+            const string cycle = "\n\n누를 때마다:  고정  →  중간  →  고정 해제  →  고정 …";
             if (pinMode == "off")
             {
-                btnPin.Content = UnpinnedIcon();
-                btnPin.ToolTip = "고정 해제\n보통 창입니다. 위젯 밖을 누르면 그 창 뒤로 내려가고, 직접 띄우기 전까지는 안 보입니다.\n(작업 표시줄 · 트레이 아이콘으로 띄움)\n\n· 누르면 → 📌 고정" + cycle;
+                btnPin.Content = Glyph("", "#8B8D96", 13);
+                btnPin.Background = Brushes.Transparent;
+                btnPin.ToolTip = "고정 해제\n보통 창입니다. 위젯 밖을 누르면 그 창 뒤로 내려가고, 직접 띄우기 전까지는 안 보입니다.\n(작업 표시줄 · 트레이 아이콘으로 띄움)\n\n· 누르면 → 고정" + cycle;
             }
             else if (pinMode == "mid")
             {
-                btnPin.Content = "↓📌";
-                btnPin.ToolTip = "↓📌 중간\n위젯 밖을 눌러도 내려가지 않고 늘 위에 있습니다.\n— 최소화 버튼을 누를 때만 내려가고, 작업 표시줄 단추나 트레이 아이콘(더블클릭)으로 다시 띄웁니다.\n\n· 누르면 → 고정 해제" + cycle;
+                // 핀 오른쪽 아래에 작은 아래 화살표
+                var g = new Grid();
+                g.Children.Add(Glyph("", CInk, 13));
+                var ch = Glyph("", CInk, 7);
+                ch.HorizontalAlignment = HorizontalAlignment.Right;
+                ch.VerticalAlignment = VerticalAlignment.Bottom;
+                ch.Margin = new Thickness(0, 0, -6, -3);
+                g.Children.Add(ch);
+                btnPin.Content = g;
+                btnPin.Background = B("#262830");
+                btnPin.ToolTip = "중간\n위젯 밖을 눌러도 내려가지 않고 늘 위에 있습니다.\n— 최소화 버튼을 누를 때만 내려가고, 작업 표시줄 단추나 트레이 아이콘(더블클릭)으로 다시 띄웁니다.\n\n· 누르면 → 고정 해제" + cycle;
             }
             else
             {
-                btnPin.Content = "📌";
-                btnPin.ToolTip = "📌 고정\n늘 맨 위에 있고, 어디를 눌러도 내려가지 않습니다(최소화 버튼도 막힘).\n\n· 누르면 → ↓📌 중간(최소화 버튼으로만 내릴 수 있음)" + cycle;
+                btnPin.Content = Glyph("", CInk, 13);
+                btnPin.Background = B("#262830");
+                btnPin.ToolTip = "고정\n늘 맨 위에 있고, 어디를 눌러도 내려가지 않습니다(최소화 버튼도 막힘).\n\n· 누르면 → 중간(최소화 버튼으로만 내릴 수 있음)" + cycle;
             }
             if (btnMinRef != null)
             {
                 btnMinRef.IsEnabled = pinMode != "top";
-                btnMinRef.Opacity = pinMode == "top" ? 0.35 : 1;
                 btnMinRef.ToolTip = pinMode == "top"
-                    ? "📌 고정 중에는 내릴 수 없습니다 — 📌 를 눌러 ↓📌 중간으로 바꾸면 내릴 수 있습니다"
+                    ? "고정 중에는 내릴 수 없습니다 — 고정 버튼을 눌러 중간으로 바꾸면 내릴 수 있습니다"
                     : "최소화 — 작업 표시줄 단추나 트레이 아이콘(더블클릭)으로 다시 띄웁니다";
             }
         }
@@ -1307,7 +1757,11 @@ namespace SessionWidget
         void UpdateSelBar()
         {
             bool on = selectMode || selected.Count > 0;
-            btnSelect.Content = on ? "☑ 고르는 중" : "☐ 여러 개 고르기";
+            btnSelect.Background = on ? B("#2F3340") : Brushes.Transparent;
+            btnSelect.Foreground = B(on ? CPickLine : "#8B8D96");
+            btnSelect.ToolTip = on
+                ? "고르는 중 — 누르면 고르기 끝 (Esc)"
+                : "여러 개 고르기 — 켜면 줄을 누를 때마다 골라짐 · 꺼져 있어도 Ctrl 클릭 · Shift 클릭으로 고를 수 있음";
             selBar.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
             selCount.Text = selected.Count > 0
                 ? "고른 세션 " + selected.Count + "개 — 아래에서 한꺼번에 처리"
@@ -1336,7 +1790,7 @@ namespace SessionWidget
                 }
             }
             try { WriteJson(metaFile, map); }
-            catch (Exception ex) { subLine.Text = "표시 저장 실패: " + ex.Message; return; }
+            catch (Exception ex) { ShowStatus("표시 저장 실패: " + ex.Message, Config.ColorError); return; }
             meta = map;
             // 처리한 뒤엔 고른 것만 비우고, 고르는 중이면 그대로 이어서 고를 수 있게
             selected.Clear();
@@ -1355,10 +1809,11 @@ namespace SessionWidget
             return t;
         }
 
-        static void AddItem(ContextMenu menu, string header, Action act)
+        static void AddItem(ContextMenu menu, string header, Action act, string glyph = null)
         {
             var mi = new MenuItem();
             mi.Header = header;
+            if (glyph != null) mi.Icon = Glyph(glyph, "#4A4D55", 12);
             mi.Click += (o, e) => act();
             menu.Items.Add(mi);
         }
