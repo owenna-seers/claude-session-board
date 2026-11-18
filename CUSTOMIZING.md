@@ -12,11 +12,11 @@
 3. 파일을 다시 읽는 주기 → `PollSeconds` · 「갱신 없음」 판정 → `StaleSeconds`
 4. 시간대 → `TzOffsetHours` (null = PC 시간대, 9 = 한국) · 시각 양식 → `ClockFormat` · `TimeFormat`
 5. 「내일 n시」 → `TomorrowHour`
-6. 카드 색 → `Color*` (작업 중 · 확인 필요 · 답 왔음 · 읽음 · 리마인드 지남 · 강조 · 원격)
+6. 색 → `static class Theme` 의 `All`(테마 묶음마다 바탕색 12개). 마우스 · 고른 것 · 버튼 · 타일 같은 나머지 색은 `Theme.Build` 가 섞어서 만든다. 새 테마는 `All` 에 한 줄 더하면 팔레트 메뉴와 트레이 메뉴 「테마」에 저절로 나온다. 처음 켰을 때 테마 → `Config.DefaultTheme`
 7. 머리줄 문구 → `MsgWaiting` · `MsgStale`
-8. 창 바탕 · 테두리 · 버튼 모양 · 글꼴 · 기본 크기 → `const string Xaml` 안(`Background='#EE1E1F24'` · `FontFamily='Malgun Gothic'` · `Width='340'` 등)
-9. 카드 한 장의 구성 → `MakeCard`, 오른쪽 클릭 메뉴 → 같은 함수 아래쪽 `AddItem(...)`
-10. 리마인드 시간 종류 → `MakeCard` 의 `⏰` 항목들과 `DoAction` 의 `remind*`
+8. 창 · 버튼 · 메뉴 · 툴팁 모양 · 글꼴 · 기본 크기 → `const string Xaml`(창 안) · `const string PopupXaml`(오른쪽 클릭 메뉴 · 툴팁). 색은 `{DynamicResource tInk}` 처럼 테마 이름에 `t` 를 붙여 쓴다
+9. 확인 필요 카드 → `MakeNeedsCard`, 한 줄 목록 → `MakeRow`, 제목 줄 아이콘 → `TitleLine`, 오른쪽 클릭 메뉴 → `BuildMenu` 의 `AddItem(...)`(끝 인자는 Segoe Fluent Icons 글자)
+10. 리마인드 시간 종류 → `BuildMenu` 의 「리마인드」 항목들과 `DoAction` 의 `remind*`
 
 고친 뒤: 떠 있는 위젯을 끄고 다시 빌드.
 
