@@ -12,6 +12,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Web.Script.Serialization;
@@ -19,6 +20,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Markup;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -131,6 +133,13 @@ namespace SessionWidget
         string accountText = "";
         StackPanel list;
         Button btnPin;
+        // 고정: auto = 항상 위(고정 버튼으로 잠깐 내리면 풀렸다가, 위젯을 다시 올리면 저절로 고정) · off = 고정 안 함
+        string pinMode = "top";
+        // 고정 단계(누를 때마다 돈다): top 📌 고정 → mid ↓📌 중간 → off 고정 해제 → top
+        //  top: 늘 맨 위, 무엇을 눌러도 안 내려감(최소화 버튼도 막음)
+        //  mid: 늘 맨 위, 밖을 눌러도 안 내려가지만 최소화 버튼으로는 내려감 → 작업 표시줄 · 트레이 아이콘으로 다시 띄움
+        //  off: 보통 창 — 밖을 누르면 그 뒤로 감
+        Button btnMinRef;
         WinForms.NotifyIcon tray;
         WinForms.ToolStripMenuItem startupItem;
         DispatcherTimer timer;
@@ -149,6 +158,10 @@ namespace SessionWidget
         bool showDone;
         // 위젯에 올린 세션만 본문에: meta board=true. 처음 보는 세션(knownIds 에 없음)은 저절로 올림
         bool showOff;
+        // 맨 아래 「가이드 보기」: 쓰는 법을 한 줄에 하나씩 펼침
+        bool showGuide;
+        Button btnGuide;
+        FrameworkElement guidePanel;
         bool boardInit;
         HashSet<string> knownIds = new HashSet<string>();
         HashSet<string> collapsedGroups = new HashSet<string>();
@@ -206,7 +219,7 @@ namespace SessionWidget
         <StackPanel>
           <DockPanel Margin='0,0,0,4'>
             <StackPanel DockPanel.Dock='Right' Orientation='Horizontal' VerticalAlignment='Top' Margin='6,-2,0,0'>
-              <Button x:Name='BtnPin' ToolTip='항상 위에'/>
+              <Button x:Name='BtnPin'/>
               <Button x:Name='BtnMin' Content='—' ToolTip='트레이로 숨기기'/>
               <Button x:Name='BtnClose' Content='✕' ToolTip='끄기'/>
             </StackPanel>
@@ -225,8 +238,40 @@ namespace SessionWidget
           </Border>
         </StackPanel>
       </Grid>
-      <TextBlock DockPanel.Dock='Bottom' Margin='10,2,10,8' Foreground='#66FFFFFF' FontSize='10.5' TextWrapping='Wrap'
-                 Text='클릭: 앱에서 열기 + 읽음 · 섹션 줄 클릭: 접기 · Ctrl / Shift 클릭: 여러 개 고르기 · 오른쪽 클릭: 강조 · 미루기 · 확인 끝 · 위젯에서 빼기 · 알람 · 메모'/>
+      <!-- 맨 아래: 「가이드 보기」 를 누르면 쓰는 법이 한 줄에 하나씩 펼쳐짐 -->
+      <StackPanel DockPanel.Dock='Bottom' Margin='8,2,8,6'>
+        <Border x:Name='GuidePanel' Visibility='Collapsed' Margin='0,4,0,4' Padding='8,6,8,6' CornerRadius='6' Background='#14FFFFFF'>
+          <Grid TextBlock.FontSize='11'>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width='Auto'/>
+              <ColumnDefinition Width='*'/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+              <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
+              <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
+            </Grid.RowDefinitions>
+            <TextBlock Grid.Row='0' Grid.Column='0' Foreground='#DDFFFFFF' FontWeight='Bold' Margin='0,1,10,1' Text='카드 클릭'/>
+            <TextBlock Grid.Row='0' Grid.Column='1' Foreground='#AAFFFFFF' Margin='0,1' TextWrapping='Wrap' Text='앱에서 그 세션 열기 + 읽음 표시'/>
+            <TextBlock Grid.Row='1' Grid.Column='0' Foreground='#DDFFFFFF' FontWeight='Bold' Margin='0,1,10,1' Text='카드 오른쪽 클릭'/>
+            <TextBlock Grid.Row='1' Grid.Column='1' Foreground='#AAFFFFFF' Margin='0,1' TextWrapping='Wrap' Text='강조 · 미루기 · 확인 끝 · 위젯에서 빼기 · 알람 · 메모'/>
+            <TextBlock Grid.Row='2' Grid.Column='0' Foreground='#DDFFFFFF' FontWeight='Bold' Margin='0,1,10,1' Text='섹션 줄 클릭'/>
+            <TextBlock Grid.Row='2' Grid.Column='1' Foreground='#AAFFFFFF' Margin='0,1' TextWrapping='Wrap' Text='그 섹션 접기 · 펼치기'/>
+            <TextBlock Grid.Row='3' Grid.Column='0' Foreground='#DDFFFFFF' FontWeight='Bold' Margin='0,1,10,1' Text='Ctrl + 클릭'/>
+            <TextBlock Grid.Row='3' Grid.Column='1' Foreground='#AAFFFFFF' Margin='0,1' TextWrapping='Wrap' Text='카드 하나씩 고르기 · 풀기'/>
+            <TextBlock Grid.Row='4' Grid.Column='0' Foreground='#DDFFFFFF' FontWeight='Bold' Margin='0,1,10,1' Text='Shift + 클릭'/>
+            <TextBlock Grid.Row='4' Grid.Column='1' Foreground='#AAFFFFFF' Margin='0,1' TextWrapping='Wrap' Text='지난번 고른 카드부터 여기까지 전부 고르기'/>
+            <TextBlock Grid.Row='5' Grid.Column='0' Foreground='#DDFFFFFF' FontWeight='Bold' Margin='0,1,10,1' Text='Ctrl + A / Esc'/>
+            <TextBlock Grid.Row='6' Grid.Column='0' Foreground='#DDFFFFFF' FontWeight='Bold' Margin='0,1,10,1' Text='📌 버튼'/>
+            <TextBlock Grid.Row='5' Grid.Column='1' Foreground='#AAFFFFFF' Margin='0,1' TextWrapping='Wrap' Text='목록 전부 고르기 / 고르기 끝'/>
+            <TextBlock Grid.Row='6' Grid.Column='1' Foreground='#AAFFFFFF' Margin='0,1' TextWrapping='Wrap' Text='누를 때마다 📌 고정 → ↓📌 중간 → 고정 해제'/>
+            <TextBlock Grid.Row='7' Grid.Column='0' Foreground='#DDFFFFFF' FontWeight='Bold' Margin='0,1,10,1' Text='— 버튼'/>
+            <TextBlock Grid.Row='7' Grid.Column='1' Foreground='#AAFFFFFF' Margin='0,1' TextWrapping='Wrap' Text='작업 표시줄로 내리기(📌 고정 중에는 꺼짐)'/>
+            <TextBlock Grid.Row='8' Grid.Column='0' Foreground='#DDFFFFFF' FontWeight='Bold' Margin='0,1,10,1' Text='트레이 아이콘'/>
+            <TextBlock Grid.Row='8' Grid.Column='1' Foreground='#AAFFFFFF' Margin='0,1' TextWrapping='Wrap' Text='더블클릭으로 다시 띄우기 · 오른쪽 클릭 메뉴'/>
+          </Grid>
+        </Border>
+        <Button x:Name='BtnGuide' HorizontalAlignment='Left' ToolTip='위젯 쓰는 법 보기 · 감추기'/>
+      </StackPanel>
       <Border x:Name='SelBar' DockPanel.Dock='Bottom' Margin='6,4,6,2' Padding='8,6,6,6' CornerRadius='6'
               Background='#33508CFF' BorderBrush='#808FB8FF' BorderThickness='1' Visibility='Collapsed'>
         <StackPanel>
@@ -285,7 +330,16 @@ namespace SessionWidget
             header.MouseLeftButtonDown += (s, e) => { try { Window.DragMove(); } catch { } };
             btnHeld.Click += (s, e) => { showHeld = !showHeld; SaveSettings(); Render(); if (showHeld) ShowSection("held"); };
             btnDone.Click += (s, e) => { showDone = !showDone; SaveSettings(); Render(); if (showDone) ShowSection("done"); };
-            btnPin.Click += (s, e) => { Window.Topmost = !Window.Topmost; SaveSettings(); Render(); };
+            // 고정 버튼: 누를 때마다 📌 고정 → ↓📌 중간 → 고정 해제 → 📌 …
+            btnPin.Click += (s, e) => SetPinMode(pinMode == "top" ? "mid" : pinMode == "mid" ? "off" : "top");
+            ToolTipService.SetInitialShowDelay(btnPin, 250);
+            ToolTipService.SetShowDuration(btnPin, 30000);
+            ToolTipService.SetShowOnDisabled(btnMinRef = btnMin, true);
+            // 고정에서는 작업 표시줄 단추를 눌러도 최소화되지 않게 되돌린다
+            Window.StateChanged += (s, e) =>
+            {
+                if (pinMode == "top" && Window.WindowState == WindowState.Minimized) Window.WindowState = WindowState.Normal;
+            };
 
             btnSelect = (Button)Window.FindName("BtnSelect");
             selBar = (FrameworkElement)Window.FindName("SelBar");
@@ -304,12 +358,16 @@ namespace SessionWidget
             btnBoardView = (Button)Window.FindName("BtnBoardView");
             btnBoardView.Click += (s, e) => BoardViewing();
             btnOff.Click += (s, e) => { showOff = !showOff; SaveSettings(); Render(); if (showOff) ShowSection("off"); };
+            btnGuide = (Button)Window.FindName("BtnGuide");
+            guidePanel = (FrameworkElement)Window.FindName("GuidePanel");
+            btnGuide.Click += (s, e) => { showGuide = !showGuide; SaveSettings(); UpdateGuide(); };
+            UpdateGuide();
             Window.PreviewKeyDown += (s, e) =>
             {
                 if (e.Key == Key.Escape && (selectMode || selected.Count > 0)) { EndSelect(); e.Handled = true; }
                 else if (e.Key == Key.A && Keyboard.Modifiers == ModifierKeys.Control) { SelectAllMain(); e.Handled = true; }
             };
-            btnMin.Click += (s, e) => Window.Hide();
+            btnMin.Click += (s, e) => { if (pinMode != "top") Window.WindowState = WindowState.Minimized; };
             btnClose.Click += (s, e) => Window.Close();
 
             SetupTray();
@@ -343,8 +401,11 @@ namespace SessionWidget
             tray.MouseClick += (s, e) =>
             {
                 if (e.Button != WinForms.MouseButtons.Left) return;
-                if (Window.IsVisible) Window.Hide(); else ShowWindow();
+                bool shown = Window.IsVisible && Window.WindowState != WindowState.Minimized;
+                if (!shown) ShowWindow();
+                else if (pinMode != "top") Window.WindowState = WindowState.Minimized;
             };
+            tray.MouseDoubleClick += (s, e) => { if (e.Button == WinForms.MouseButtons.Left) ShowWindow(); };
             var menu = new WinForms.ContextMenuStrip();
             menu.Items.Add("보이기", null, (s, e) => ShowWindow());
             startupItem = new WinForms.ToolStripMenuItem("윈도우 시작할 때 같이 켜기");
@@ -363,6 +424,8 @@ namespace SessionWidget
         void ShowWindow()
         {
             Window.Show();
+            if (Window.WindowState == WindowState.Minimized) Window.WindowState = WindowState.Normal;
+            Window.Topmost = pinMode != "off";
             Window.Activate();
         }
 
@@ -406,10 +469,15 @@ namespace SessionWidget
             if (d.ContainsKey("Height")) Window.Height = ToDouble(d["Height"]);
             if (d.ContainsKey("Left")) Window.Left = ToDouble(d["Left"]);
             if (d.ContainsKey("Top")) Window.Top = ToDouble(d["Top"]);
-            if (d.ContainsKey("Topmost")) Window.Topmost = d["Topmost"] is bool && (bool)d["Topmost"];
+            if (d.ContainsKey("Topmost")) pinMode = (d["Topmost"] is bool && (bool)d["Topmost"]) ? "top" : "off";
+            string pm = Str(d, "pinMode");
+            if (pm == "top" || pm == "mid" || pm == "off") pinMode = pm;
+            if (pm == "auto") pinMode = "top"; // 11/18 잠깐 있던 판의 값
+            Window.Topmost = pinMode != "off";
             showHeld = d.ContainsKey("showHeld") && d["showHeld"] is bool && (bool)d["showHeld"];
             showDone = d.ContainsKey("showDone") && d["showDone"] is bool && (bool)d["showDone"];
             showOff = d.ContainsKey("showOff") && d["showOff"] is bool && (bool)d["showOff"];
+            showGuide = d.ContainsKey("showGuide") && d["showGuide"] is bool && (bool)d["showGuide"];
             boardInit = d.ContainsKey("boardInit") && d["boardInit"] is bool && (bool)d["boardInit"];
             knownIds = StrSet(Get(d, "knownIds"));
             collapsedGroups = StrSet(Get(d, "collapsedGroups"));
@@ -428,14 +496,22 @@ namespace SessionWidget
         void SaveSettings()
         {
             var d = new Dictionary<string, object>();
-            d["Left"] = Window.Left;
-            d["Top"] = Window.Top;
-            d["Width"] = Window.Width;
-            d["Height"] = Window.Height;
-            d["Topmost"] = Window.Topmost;
+            // 최소화 중이면 창 크기 값이 흐트러져 있으므로, 원래(되돌릴) 자리 · 크기로 저장
+            var b = Window.WindowState == WindowState.Normal
+                ? new Rect(Window.Left, Window.Top, Window.Width, Window.Height)
+                : Window.RestoreBounds;
+            if (b.IsEmpty || b.Width < Window.MinWidth || b.Height < Window.MinHeight)
+                b = new Rect(Window.Left, Window.Top, Math.Max(Window.Width, 340), Math.Max(Window.Height, 520));
+            d["Left"] = b.Left;
+            d["Top"] = b.Top;
+            d["Width"] = b.Width;
+            d["Height"] = b.Height;
+            d["Topmost"] = pinMode != "off";
+            d["pinMode"] = pinMode;
             d["showHeld"] = showHeld;
             d["showDone"] = showDone;
             d["showOff"] = showOff;
+            d["showGuide"] = showGuide;
             d["boardInit"] = boardInit;
             d["knownIds"] = knownIds.OrderBy(x => x, StringComparer.Ordinal).ToList();
             d["collapsedGroups"] = collapsedGroups.OrderBy(x => x, StringComparer.Ordinal).ToList();
@@ -823,7 +899,7 @@ namespace SessionWidget
                 btnBoardView.IsEnabled = true;
                 btnBoardView.Opacity = 1;
             }
-            btnPin.Content = Window.Topmost ? "📌" : "📍";
+            UpdatePinButton();
 
             var visible = sessions.Where(s => InMain(s, MetaOf(s.Id))).ToList();
             int running = visible.Count(s => s.IsRunning);
@@ -1122,6 +1198,68 @@ namespace SessionWidget
             Render();
             Border card;
             if (cardById.TryGetValue(id, out card)) card.BringIntoView();
+        }
+
+        // ---------- 고정 ----------
+
+        /// 「고정 해제」 아이콘: 흐린 📌 위에 빨간 사선
+        static object UnpinnedIcon()
+        {
+            var g = new Grid();
+            var t = new TextBlock();
+            t.Text = "📌";
+            t.Opacity = 0.55;
+            g.Children.Add(t);
+            var line = new System.Windows.Shapes.Line();
+            line.X1 = 0; line.Y1 = 14; line.X2 = 14; line.Y2 = 0;
+            line.Stroke = B("#FF6B6B");
+            line.StrokeThickness = 2;
+            line.HorizontalAlignment = HorizontalAlignment.Center;
+            line.VerticalAlignment = VerticalAlignment.Center;
+            g.Children.Add(line);
+            return g;
+        }
+
+        void UpdateGuide()
+        {
+            guidePanel.Visibility = showGuide ? Visibility.Visible : Visibility.Collapsed;
+            btnGuide.Content = showGuide ? "▾ 가이드 감추기" : "▸ 가이드 보기";
+        }
+
+        void UpdatePinButton()
+        {
+            const string cycle = "\n\n누를 때마다:  📌 고정  →  ↓📌 중간  →  고정 해제  →  📌 …";
+            if (pinMode == "off")
+            {
+                btnPin.Content = UnpinnedIcon();
+                btnPin.ToolTip = "고정 해제\n보통 창입니다. 위젯 밖을 누르면 그 창 뒤로 내려가고, 직접 띄우기 전까지는 안 보입니다.\n(작업 표시줄 · 트레이 아이콘으로 띄움)\n\n· 누르면 → 📌 고정" + cycle;
+            }
+            else if (pinMode == "mid")
+            {
+                btnPin.Content = "↓📌";
+                btnPin.ToolTip = "↓📌 중간\n위젯 밖을 눌러도 내려가지 않고 늘 위에 있습니다.\n— 최소화 버튼을 누를 때만 내려가고, 작업 표시줄 단추나 트레이 아이콘(더블클릭)으로 다시 띄웁니다.\n\n· 누르면 → 고정 해제" + cycle;
+            }
+            else
+            {
+                btnPin.Content = "📌";
+                btnPin.ToolTip = "📌 고정\n늘 맨 위에 있고, 어디를 눌러도 내려가지 않습니다(최소화 버튼도 막힘).\n\n· 누르면 → ↓📌 중간(최소화 버튼으로만 내릴 수 있음)" + cycle;
+            }
+            if (btnMinRef != null)
+            {
+                btnMinRef.IsEnabled = pinMode != "top";
+                btnMinRef.Opacity = pinMode == "top" ? 0.35 : 1;
+                btnMinRef.ToolTip = pinMode == "top"
+                    ? "📌 고정 중에는 내릴 수 없습니다 — 📌 를 눌러 ↓📌 중간으로 바꾸면 내릴 수 있습니다"
+                    : "최소화 — 작업 표시줄 단추나 트레이 아이콘(더블클릭)으로 다시 띄웁니다";
+            }
+        }
+
+        void SetPinMode(string mode)
+        {
+            pinMode = mode;
+            Window.Topmost = mode != "off";
+            SaveSettings();
+            Render();
         }
 
         // ---------- 여러 개 고르기 ----------
