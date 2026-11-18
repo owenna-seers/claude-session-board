@@ -32,8 +32,8 @@ using WinForms = System.Windows.Forms;
 [assembly: AssemblyProduct("세션 위젯")]
 [assembly: AssemblyDescription("Claude 세션 현황 위젯")]
 [assembly: AssemblyCompany("session-board")]
-[assembly: AssemblyVersion("1.4.0.0")]
-[assembly: AssemblyFileVersion("1.4.0.0")]
+[assembly: AssemblyVersion("1.4.1.0")]
+[assembly: AssemblyFileVersion("1.4.1.0")]
 
 namespace SessionWidget
 {
@@ -56,6 +56,8 @@ namespace SessionWidget
         public const string TimeFormat = "HH:mm:ss";
         /// 「내일 n시」 리마인드의 n
         public const int TomorrowHour = 9;
+        /// 세션이 끝날 때(답 왔음 · 확인 필요) 위젯도 소리 + 트레이 풍선을 띄우는가. Claude 앱 알림과 겹쳐 기본은 끔(트레이 메뉴에서 켬). 리마인드는 늘 울림
+        public const bool NotifySessionEnd = false;
 
         // 색은 아래 Theme 에 (테마 묶음 · 파생 규칙). 위젯 머리의 팔레트 버튼 · 트레이 메뉴 「테마」 로 고른다
         /// 처음 켰을 때 테마
@@ -251,6 +253,8 @@ namespace SessionWidget
         Button btnMinRef;
         WinForms.NotifyIcon tray;
         WinForms.ToolStripMenuItem startupItem;
+        // 세션 끝 알림(답 왔음 · 확인 필요)을 위젯도 띄우는가 — widget-settings notifyEnd
+        bool notifyEnd = Config.NotifySessionEnd;
         DispatcherTimer timer;
 
         List<Session> sessions = new List<Session>();
@@ -710,6 +714,15 @@ namespace SessionWidget
                 startupItem.Checked = IsStartup();
             };
             menu.Items.Add(startupItem);
+            var notifyItem = new WinForms.ToolStripMenuItem("세션이 끝나면 위젯도 알림 (Claude 앱 알림과 겹침)");
+            notifyItem.Checked = notifyEnd;
+            notifyItem.Click += (s, e) =>
+            {
+                notifyEnd = !notifyEnd;
+                notifyItem.Checked = notifyEnd;
+                SaveSettings();
+            };
+            menu.Items.Add(notifyItem);
             var themeItem = new WinForms.ToolStripMenuItem("테마");
             foreach (var d in Theme.All)
             {
@@ -791,6 +804,7 @@ namespace SessionWidget
             collapsedGroups = StrSet(Get(d, "collapsedGroups"));
             openRead = StrSet(Get(d, "openReadGroups"));
             if (Str(d, "theme") != "") themeId = Theme.Find(Str(d, "theme")).Id;
+            if (d.ContainsKey("notifyEnd") && d["notifyEnd"] is bool) notifyEnd = (bool)d["notifyEnd"];
             if (d.ContainsKey("zoom")) { try { zoom = Math.Max(0.8, Math.Min(1.5, ToDouble(d["zoom"]))); } catch { } }
 
             // 모니터 구성이 바뀌어 화면 밖이면 오른쪽 위로
@@ -829,6 +843,7 @@ namespace SessionWidget
             d["openReadGroups"] = openRead.OrderBy(x => x, StringComparer.Ordinal).ToList();
             d["theme"] = themeId;
             d["zoom"] = zoom;
+            d["notifyEnd"] = notifyEnd;
             WriteJson(settingsFile, d);
         }
 
@@ -1091,7 +1106,7 @@ namespace SessionWidget
                                 // 미룬 세션은 알리지 않는다(접힌 칸에 「새 답 있음」만)
                                 // 위젯에 올리지 않은 세션도 알리지 않는다
                                 if (prevRunning.TryGetValue(s.Id, out was) && was && !s.IsRunning &&
-                                    Str(MetaOf(s.Id), "heldAt") == "" && IsOn(MetaOf(s.Id)))
+                                    Str(MetaOf(s.Id), "heldAt") == "" && IsOn(MetaOf(s.Id)) && notifyEnd)
                                 {
                                     if (IsNeeds(s)) Alert("🙋 확인 필요", s.Title + (s.Ask != "" ? "\n→ " + s.Ask : ""), true);
                                     else Alert("💬 답 왔음", s.Title, false);
